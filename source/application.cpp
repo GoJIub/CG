@@ -22,6 +22,7 @@
 namespace {
 
 constexpr float octahedron_radius = 1.0f;
+constexpr float minimum_rotation_axis_length = 0.0001f;
 
 struct Vertex {
     float position[3];
@@ -617,6 +618,13 @@ void draw_scene_controls() {
 		"%.1f deg/s"
 	);
 
+	ImGui::SliderFloat3(
+		"Rotation axis",
+		&scene_settings.rotation_axis.x,
+		-1.0f,
+		1.0f
+	);
+
 	ImGui::SliderFloat(
 		"Field of view",
 		&scene_settings.field_of_view_degrees,
@@ -664,10 +672,18 @@ void update(double time) {
 
 	GlobalUniforms uniforms{};
 
+	if (glm::length(scene_settings.rotation_axis) <
+		minimum_rotation_axis_length) {
+		scene_settings.rotation_axis = glm::vec3(0.0f, 1.0f, 0.0f);
+	}
+
+	const glm::vec3 rotation_axis =
+		glm::normalize(scene_settings.rotation_axis);
+
 	uniforms.model = glm::rotate(
 		glm::mat4(1.0f),
 		rotation_angle,
-		scene_settings.rotation_axis
+		rotation_axis
 	);
 
 	uniforms.view = glm::lookAt(
