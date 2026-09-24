@@ -67,3 +67,8 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# Application-generated files
+imgui.ini
+*.spv
+tmp/
