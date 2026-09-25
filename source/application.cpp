@@ -52,6 +52,7 @@ struct GlobalUniforms {
     glm::mat4 model{ 1.0f };
     glm::mat4 view{ 1.0f };
     glm::mat4 projection{ 1.0f };
+	glm::vec4 object_color{ 1.0f };
 };
 
 struct SceneSettings {
@@ -75,6 +76,8 @@ struct SceneSettings {
 	float trajectory_radius = 0.8f;
 	float trajectory_height = 0.35f;
 	float trajectory_speed = 1.0f;
+
+	glm::vec4 object_color{ 1.0f, 1.0f, 1.0f, 1.0f };
 };
 
 struct AnimationState {
@@ -89,7 +92,11 @@ struct AnimationState {
 SceneSettings scene_settings;
 AnimationState animation_state;
 
-static_assert(sizeof(GlobalUniforms) == sizeof(float) * 4 * 4 * 3);
+static_assert(
+    sizeof(GlobalUniforms) ==
+    sizeof(glm::mat4) * 3 +
+    sizeof(glm::vec4)
+);
 
 constexpr std::array<Vertex, 6> vertices = {
 	Vertex{{0.0f, octahedron_radius, 0.0f}, {1.0f, 0.0f, 0.0f}},
@@ -534,7 +541,9 @@ bool initialize() {
 		.binding = 0,
 		.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+		.stageFlags =
+			VK_SHADER_STAGE_VERTEX_BIT |
+			VK_SHADER_STAGE_FRAGMENT_BIT
 	};
 
 	const VkDescriptorSetLayoutCreateInfo set_layout_info{
@@ -712,6 +721,11 @@ void draw_scene_controls() {
 		"%.2f"
 	);
 
+	ImGui::ColorEdit3(
+		"Object color",
+		&scene_settings.object_color.x
+	);
+
 	ImGui::SliderFloat(
 		"Trajectory radius",
 		&scene_settings.trajectory_radius,
@@ -865,6 +879,8 @@ void update(double time) {
 
 	// У GLM и Vulkan различается направление оси Y экрана.
 	uniforms.projection[1][1] *= -1.0f;
+
+	uniforms.object_color = scene_settings.object_color;
 
 	update_uniform_buffer(uniforms);
 }

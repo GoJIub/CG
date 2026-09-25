@@ -7,6 +7,7 @@ layout(set = 0, binding = 0) uniform GlobalUniforms {
     mat4 model;
     mat4 view;
     mat4 projection;
+    vec4 object_color;
 } globals;
 
 layout(location = 0) out vec3 out_color;
