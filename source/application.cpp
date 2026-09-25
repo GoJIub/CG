@@ -71,12 +71,19 @@ struct SceneSettings {
 
 	glm::vec3 position{ 0.0f, 0.0f, 0.0f };
 	glm::vec3 scale{ 1.0f, 1.0f, 1.0f };
+
+	float trajectory_radius = 0.8f;
+	float trajectory_height = 0.35f;
+	float trajectory_speed = 1.0f;
 };
 
 struct AnimationState {
 	double previous_time = 0.0;
 	float rotation_angle = 0.0f;
 	bool started = false;
+
+	float trajectory_phase = 0.0f;
+	bool is_playing = true;
 };
 
 SceneSettings scene_settings;
@@ -705,6 +712,38 @@ void draw_scene_controls() {
 		"%.2f"
 	);
 
+	ImGui::SliderFloat(
+		"Trajectory radius",
+		&scene_settings.trajectory_radius,
+		0.0f,
+		2.0f,
+		"%.2f"
+	);
+
+	ImGui::SliderFloat(
+		"Trajectory height",
+		&scene_settings.trajectory_height,
+		0.0f,
+		2.0f,
+		"%.2f"
+	);
+
+	ImGui::SliderFloat(
+		"Trajectory speed",
+		&scene_settings.trajectory_speed,
+		0.0f,
+		4.0f,
+		"%.2f rad/s"
+	);
+
+	if (ImGui::Button(
+		animation_state.is_playing
+			? "Pause animation"
+			: "Resume animation"
+	)) {
+		animation_state.is_playing = !animation_state.is_playing;
+	}
+
 	if (ImGui::Button("Reset scene")) {
 		scene_settings = SceneSettings{};
 		animation_state = AnimationState{};
@@ -742,9 +781,15 @@ void update(double time) {
 
 	animation_state.previous_time = time;
 
-	animation_state.rotation_angle +=
-		delta_time *
-		glm::radians(scene_settings.rotation_speed_degrees);
+	if (animation_state.is_playing) {
+		animation_state.trajectory_phase +=
+			delta_time *
+			scene_settings.trajectory_speed;
+
+		animation_state.rotation_angle +=
+			delta_time *
+			glm::radians(scene_settings.rotation_speed_degrees);
+	}
 
 	const float rotation_angle = animation_state.rotation_angle;
 
@@ -762,9 +807,27 @@ void update(double time) {
 	const glm::vec3 rotation_axis =
 		glm::normalize(scene_settings.rotation_axis);
 
+	const float trajectory_phase =
+		animation_state.trajectory_phase;
+
+	const glm::vec3 trajectory_offset{
+		scene_settings.trajectory_radius *
+			glm::sin(trajectory_phase),
+
+		scene_settings.trajectory_height *
+			glm::sin(2.0f * trajectory_phase),
+
+		scene_settings.trajectory_radius *
+			glm::cos(trajectory_phase)
+	};
+
+	const glm::vec3 object_position =
+		scene_settings.position +
+		trajectory_offset;
+
 	glm::mat4 model(1.0f);
 
-	model = glm::translate(model, scene_settings.position);
+	model = glm::translate(model, object_position);
 	model = glm::rotate(model, rotation_angle, rotation_axis);
 	model = glm::scale(model, scene_settings.scale);
 
