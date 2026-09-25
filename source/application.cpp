@@ -48,6 +48,17 @@ struct Vertex {
     float color[3];
 };
 
+constexpr Vertex make_vertex(float x, float y, float z) {
+    return Vertex{
+        {x, y, z},
+        {
+            (x / octahedron_radius + 1.0f) * 0.5f,
+            (y / octahedron_radius + 1.0f) * 0.5f,
+            (z / octahedron_radius + 1.0f) * 0.5f
+        }
+    };
+}
+
 struct GlobalUniforms {
     glm::mat4 model{ 1.0f };
     glm::mat4 view{ 1.0f };
@@ -99,12 +110,12 @@ static_assert(
 );
 
 constexpr std::array<Vertex, 6> vertices = {
-	Vertex{{0.0f, octahedron_radius, 0.0f}, {1.0f, 0.0f, 0.0f}},
-	Vertex{{octahedron_radius, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}},
-	Vertex{{0.0f, 0.0f, -octahedron_radius}, {0.0f, 1.0f, 0.0f}},
-	Vertex{{-octahedron_radius, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}},
-	Vertex{{0.0f, 0.0f, octahedron_radius}, {0.0f, 1.0f, 0.0f}},
-	Vertex{{0.0f, -octahedron_radius, 0.0f}, {1.0f, 0.0f, 0.0f}}
+    make_vertex(0.0f, octahedron_radius, 0.0f),
+    make_vertex(octahedron_radius, 0.0f, 0.0f),
+    make_vertex(0.0f, 0.0f, -octahedron_radius),
+    make_vertex(-octahedron_radius, 0.0f, 0.0f),
+    make_vertex(0.0f, 0.0f, octahedron_radius),
+    make_vertex(0.0f, -octahedron_radius, 0.0f)
 };
 
 constexpr std::array<uint16_t, 24> indices = {
