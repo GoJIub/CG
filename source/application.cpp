@@ -21,6 +21,25 @@
 
 namespace {
 
+constexpr float default_imgui_scale = 1.5f;
+
+struct UiSettings {
+	float scale = default_imgui_scale;
+};
+
+UiSettings ui_settings;
+bool imgui_scale_pending = false;
+ImGuiStyle unscaled_imgui_style{};
+
+void apply_imgui_scale(float scale) {
+	// На случай, если старое значение уже было установлено.
+	ImGui::GetIO().FontGlobalScale = 1.0f;
+
+	ImGui::GetStyle() = unscaled_imgui_style;
+	ImGui::GetStyle().FontScaleMain = scale;
+	ImGui::GetStyle().ScaleAllSizes(scale);
+}
+
 constexpr float octahedron_radius = 1.0f;
 constexpr float minimum_rotation_axis_length = 0.0001f;
 
@@ -438,6 +457,20 @@ void destroy_resources() {
 
 namespace application {
 
+void configure_imgui() {
+	unscaled_imgui_style = ImGui::GetStyle();
+	apply_imgui_scale(ui_settings.scale);
+}
+
+void apply_pending_imgui_scale() {
+	if (!imgui_scale_pending) {
+		return;
+	}
+
+	apply_imgui_scale(ui_settings.scale);
+	imgui_scale_pending = false;
+}
+
 bool initialize() {
 	auto& context = graphics::internal::context;
 
@@ -654,6 +687,16 @@ void draw_scene_controls() {
 	if (ImGui::Button("Reset scene")) {
 		scene_settings = SceneSettings{};
 		animation_state = AnimationState{};
+	}
+
+	if (ImGui::SliderFloat(
+		"Interface scale",
+		&ui_settings.scale,
+		1.0f,
+		2.5f,
+		"%.2fx"
+	)) {
+		imgui_scale_pending = true;
 	}
 
 	ImGui::End();

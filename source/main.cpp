@@ -54,6 +54,8 @@ int main() {
 		goto err_imgui_init;
 	}
 
+	application::configure_imgui();
+
 	if (!ImGui_ImplGlfw_InitForVulkan(glfw_window, true)) {
 		std::cerr << "Failed to initialize ImGUI GLFW backend for Vulkan renderer\n";
 		status = EXIT_FAILURE;
@@ -77,6 +79,8 @@ int main() {
 
 		glfwPollEvents();
 		ImGui_ImplGlfw_NewFrame();
+
+		application::apply_pending_imgui_scale();
 
 		ImGui::NewFrame();
 		application::update(time);
