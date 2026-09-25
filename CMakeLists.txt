@@ -3,7 +3,16 @@ include(FetchContent)
 
 project(vulkan-starter-app LANGUAGES C CXX)
 
-add_executable(${PROJECT_NAME} source/main.cpp source/graphics_internal.cpp source/application.cpp)
+add_executable(
+	${PROJECT_NAME}
+	source/main.cpp
+	source/graphics_internal.cpp
+	source/application.cpp
+	source/octahedron_mesh.cpp
+	source/scene_renderer.cpp
+	source/scene_ui.cpp
+	source/scene.cpp
+)
 
 if(LINUX)
 	target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
@@ -16,6 +25,11 @@ elseif(MSVC)
 else()
 	message(FATAL_ERROR "${CMAKE_SYSTEM_NAME} is not supported")
 endif()
+
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    GLM_FORCE_RADIANS
+    GLM_FORCE_DEPTH_ZERO_TO_ONE
+)
 
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD_REQUIRED TRUE CXX_STANDARD 20)
 
