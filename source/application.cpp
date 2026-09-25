@@ -46,6 +46,9 @@ struct SceneSettings {
 	float field_of_view_degrees = 45.0f;
 	float near_plane = 0.1f;
 	float far_plane = 100.0f;
+
+	bool use_perspective_projection = true;
+	float orthographic_half_height = 2.2f;
 };
 
 struct AnimationState {
@@ -625,13 +628,28 @@ void draw_scene_controls() {
 		1.0f
 	);
 
-	ImGui::SliderFloat(
-		"Field of view",
-		&scene_settings.field_of_view_degrees,
-		20.0f,
-		120.0f,
-		"%.1f deg"
+	ImGui::Checkbox(
+		"Perspective projection",
+		&scene_settings.use_perspective_projection
 	);
+
+	if (scene_settings.use_perspective_projection) {
+		ImGui::SliderFloat(
+			"Field of view",
+			&scene_settings.field_of_view_degrees,
+			20.0f,
+			120.0f,
+			"%.1f deg"
+		);
+	} else {
+		ImGui::SliderFloat(
+			"Orthographic half height",
+			&scene_settings.orthographic_half_height,
+			0.5f,
+			10.0f,
+			"%.2f"
+		);
+	}
 
 	if (ImGui::Button("Reset scene")) {
 		scene_settings = SceneSettings{};
@@ -692,12 +710,29 @@ void update(double time) {
 		scene_settings.camera_up
 	);
 
-	uniforms.projection = glm::perspective(
-		glm::radians(scene_settings.field_of_view_degrees),
-		aspect_ratio,
-		scene_settings.near_plane,
-		scene_settings.far_plane
-	);
+	if (scene_settings.use_perspective_projection) {
+		uniforms.projection = glm::perspective(
+			glm::radians(scene_settings.field_of_view_degrees),
+			aspect_ratio,
+			scene_settings.near_plane,
+			scene_settings.far_plane
+		);
+	} else {
+		const float half_height =
+			scene_settings.orthographic_half_height;
+
+		const float half_width =
+			aspect_ratio * half_height;
+
+		uniforms.projection = glm::ortho(
+			-half_width,
+			half_width,
+			-half_height,
+			half_height,
+			scene_settings.near_plane,
+			scene_settings.far_plane
+		);
+	}
 
 	// У GLM и Vulkan различается направление оси Y экрана.
 	uniforms.projection[1][1] *= -1.0f;
