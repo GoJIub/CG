@@ -68,6 +68,9 @@ struct SceneSettings {
 
 	bool use_perspective_projection = true;
 	float orthographic_half_height = 2.2f;
+
+	glm::vec3 position{ 0.0f, 0.0f, 0.0f };
+	glm::vec3 scale{ 1.0f, 1.0f, 1.0f };
 };
 
 struct AnimationState {
@@ -684,6 +687,24 @@ void draw_scene_controls() {
 		);
 	}
 
+	ImGui::DragFloat3(
+		"Position",
+		&scene_settings.position.x,
+		0.01f,
+		-3.0f,
+		3.0f,
+		"%.2f"
+	);
+
+	ImGui::DragFloat3(
+		"Scale",
+		&scene_settings.scale.x,
+		0.01f,
+		0.1f,
+		5.0f,
+		"%.2f"
+	);
+
 	if (ImGui::Button("Reset scene")) {
 		scene_settings = SceneSettings{};
 		animation_state = AnimationState{};
@@ -741,11 +762,13 @@ void update(double time) {
 	const glm::vec3 rotation_axis =
 		glm::normalize(scene_settings.rotation_axis);
 
-	uniforms.model = glm::rotate(
-		glm::mat4(1.0f),
-		rotation_angle,
-		rotation_axis
-	);
+	glm::mat4 model(1.0f);
+
+	model = glm::translate(model, scene_settings.position);
+	model = glm::rotate(model, rotation_angle, rotation_axis);
+	model = glm::scale(model, scene_settings.scale);
+
+	uniforms.model = model;
 
 	uniforms.view = glm::lookAt(
 		scene_settings.camera_position,
