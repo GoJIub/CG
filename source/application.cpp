@@ -5,8 +5,7 @@
 
 namespace {
 
-scene::SceneSettings scene_settings;
-scene::AnimationState animation_state;
+scene::SceneState scene_state;
 
 }
 
@@ -29,7 +28,7 @@ void shutdown() {
 }
 
 void update(double time) {
-	scene_ui::draw_scene_controls(scene_settings, animation_state);
+	scene_ui::draw_scene_controls(scene_state);
 
 	auto& context = graphics::internal::context;
 
@@ -37,23 +36,30 @@ void update(double time) {
 		return;
 	}
 
-	scene::update_animation_state(
-		scene_settings,
-		animation_state,
-		time
-	);
+	for (std::size_t i = 0; i < scene_state.objects.size(); ++i) {
+		scene::update_animation_state(
+			scene_state.objects[i].settings,
+			scene_state.objects[i].animation,
+			time
+		);
+	}
 
 	const float aspect_ratio =
 		static_cast<float>(context.swapchain_extent.width) /
 		static_cast<float>(context.swapchain_extent.height);
 
-	const scene::GlobalUniforms uniforms = scene::compute_global_uniforms(
-		scene_settings,
-		animation_state,
-		aspect_ratio
-	);
+	scene::SceneUniforms uniforms{};
+	for (std::size_t i = 0; i < scene_state.objects.size(); ++i) {
+		uniforms[i] = scene::compute_global_uniforms(
+			scene_state.objects[i].settings,
+			scene_state.camera,
+			scene_state.objects[i].animation,
+			scene_state.center_mode,
+			aspect_ratio
+		);
+	}
 
-	scene_renderer::update_uniform_buffer(uniforms);
+	scene_renderer::update_uniform_buffers(uniforms);
 }
 
 void render(const graphics::internal::FrameData& fd) {

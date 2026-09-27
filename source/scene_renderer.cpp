@@ -14,6 +14,12 @@
 
 namespace {
 
+struct ObjectResources {
+    VkBuffer uniform_buffer = VK_NULL_HANDLE;
+    VmaAllocation uniform_allocation = nullptr;
+    VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
+};
+
 struct Resources {
 	VkShaderModule vertex_shader = VK_NULL_HANDLE;
 	VkShaderModule fragment_shader = VK_NULL_HANDLE;
@@ -27,13 +33,11 @@ struct Resources {
 	VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
 	VkPipeline pipeline = VK_NULL_HANDLE;
 
-	VkBuffer uniform_buffer = VK_NULL_HANDLE;
-	VmaAllocation uniform_buffer_allocation = nullptr;
-
 	VkDescriptorSetLayout global_uniform_set_layout = VK_NULL_HANDLE;
 
 	VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
-	VkDescriptorSet global_uniform_set = VK_NULL_HANDLE;
+
+	std::array<ObjectResources, scene::object_count> objects{};
 };
 
 Resources resources;
@@ -271,7 +275,9 @@ void destroy_resources() {
 			nullptr
 		);
 		resources.descriptor_pool = VK_NULL_HANDLE;
-		resources.global_uniform_set = VK_NULL_HANDLE;
+		for (auto& object_resources : resources.objects) {
+			object_resources.descriptor_set = VK_NULL_HANDLE;
+		}
 	}
 
 	if (resources.global_uniform_set_layout != VK_NULL_HANDLE) {
@@ -283,14 +289,16 @@ void destroy_resources() {
 		resources.global_uniform_set_layout = VK_NULL_HANDLE;
 	}
 
-	if (resources.uniform_buffer != VK_NULL_HANDLE) {
-		vmaDestroyBuffer(
-			context.allocator,
-			resources.uniform_buffer,
-			resources.uniform_buffer_allocation
-		);
-		resources.uniform_buffer = VK_NULL_HANDLE;
-		resources.uniform_buffer_allocation = nullptr;
+	for (auto& object_resources : resources.objects) {
+		if (object_resources.uniform_buffer != VK_NULL_HANDLE) {
+			vmaDestroyBuffer(
+				context.allocator,
+				object_resources.uniform_buffer,
+				object_resources.uniform_allocation
+			);
+			object_resources.uniform_buffer = VK_NULL_HANDLE;
+			object_resources.uniform_allocation = nullptr;
+		}
 	}
 
 	if (resources.vertex_buffer != VK_NULL_HANDLE) {
@@ -358,15 +366,17 @@ bool initialize() {
 
 	const scene::GlobalUniforms initial_uniforms{};
 
-	if (!create_buffer(
-		sizeof(initial_uniforms),
-		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-		&initial_uniforms,
-		resources.uniform_buffer,
-		resources.uniform_buffer_allocation
-	)) {
-		destroy_resources();
-		return false;
+	for (std::size_t i = 0; i < resources.objects.size(); ++i) {
+		if (!create_buffer(
+			sizeof(initial_uniforms),
+			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+			&initial_uniforms,
+			resources.objects[i].uniform_buffer,
+			resources.objects[i].uniform_allocation
+		)) {
+			destroy_resources();
+			return false;
+		}
 	}
 
 	const VkDescriptorSetLayoutBinding global_uniform_binding{
@@ -397,12 +407,12 @@ bool initialize() {
 
 	const VkDescriptorPoolSize pool_size{
 		.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-		.descriptorCount = 1,
+		.descriptorCount = scene::object_count,
 	};
 
 	const VkDescriptorPoolCreateInfo pool_info{
 		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-		.maxSets = 1,
+		.maxSets = scene::object_count,
 		.poolSizeCount = 1,
 		.pPoolSizes = &pool_size,
 	};
@@ -425,38 +435,40 @@ bool initialize() {
 		.pSetLayouts = &resources.global_uniform_set_layout,
 	};
 
-	if (vkAllocateDescriptorSets(
-		context.device,
-		&allocate_info,
-		&resources.global_uniform_set
-	) != VK_SUCCESS) {
-		std::cerr << "Failed to allocate descriptor sets\n";
-		destroy_resources();
-		return false;
+	for (auto& object_resources : resources.objects) {
+		if (vkAllocateDescriptorSets(
+			context.device,
+			&allocate_info,
+			&object_resources.descriptor_set
+		) != VK_SUCCESS) {
+			std::cerr << "Failed to allocate descriptor sets\n";
+			destroy_resources();
+			return false;
+		}
+
+		const VkDescriptorBufferInfo uniform_buffer_info{
+			.buffer = object_resources.uniform_buffer,
+			.offset = 0,
+			.range = sizeof(scene::GlobalUniforms),
+		};
+
+		const VkWriteDescriptorSet write_descriptor_set{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.dstSet = object_resources.descriptor_set,
+			.dstBinding = 0,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			.pBufferInfo = &uniform_buffer_info
+		};
+
+		vkUpdateDescriptorSets(
+			context.device,
+			1,
+			&write_descriptor_set,
+			0,
+			nullptr
+		);
 	}
-
-	const VkDescriptorBufferInfo uniform_buffer_info{
-		.buffer = resources.uniform_buffer,
-		.offset = 0,
-		.range = sizeof(scene::GlobalUniforms),
-	};
-
-	const VkWriteDescriptorSet write_descriptor_set{
-		.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-		.dstSet = resources.global_uniform_set,
-		.dstBinding = 0,
-		.descriptorCount = 1,
-		.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-		.pBufferInfo = &uniform_buffer_info
-	};
-
-	vkUpdateDescriptorSets(
-		context.device,
-		1,
-		&write_descriptor_set,
-		0,
-		nullptr
-	);
 
 	const VkDescriptorSetLayout set_layouts[] = {
 		resources.global_uniform_set_layout,
@@ -495,32 +507,34 @@ void shutdown() {
 }
 
 
-bool update_uniform_buffer(const scene::GlobalUniforms& uniforms) {
+bool update_uniform_buffers(const scene::SceneUniforms& uniforms) {
 	auto& context = graphics::internal::context;
 
-	void* mapped_data = nullptr;
-	if (vmaMapMemory(
-		context.allocator,
-		resources.uniform_buffer_allocation,
-		&mapped_data
-	) != VK_SUCCESS) {
-		std::cerr << "Failed to map uniform buffer memory\n";
-		return false;
+	for (std::size_t i = 0; i < resources.objects.size(); ++i) {
+		void* mapped_data = nullptr;
+		if (vmaMapMemory(
+			context.allocator,
+			resources.objects[i].uniform_allocation,
+			&mapped_data
+		) != VK_SUCCESS) {
+			std::cerr << "Failed to map uniform buffer memory for object " << i << '\n';
+			return false;
+		}
+
+		std::memcpy(mapped_data, &uniforms[i], sizeof(scene::GlobalUniforms));
+
+		vmaFlushAllocation(
+			context.allocator,
+			resources.objects[i].uniform_allocation,
+			0,
+			sizeof(scene::GlobalUniforms)
+		);
+
+		vmaUnmapMemory(
+			context.allocator,
+			resources.objects[i].uniform_allocation
+		);
 	}
-
-	std::memcpy(mapped_data, &uniforms, sizeof(uniforms));
-
-	vmaFlushAllocation(
-		context.allocator,
-		resources.uniform_buffer_allocation,
-		0,
-		sizeof(uniforms)
-	);
-
-	vmaUnmapMemory(
-		context.allocator,
-		resources.uniform_buffer_allocation
-	);
 
 	return true;
 }
@@ -575,33 +589,14 @@ void render(const graphics::internal::FrameData& fd) {
 	vkCmdSetViewport(command_buffer, 0, 1, &viewport);
 	vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
-	vkCmdBindPipeline(
-		command_buffer,
-		VK_PIPELINE_BIND_POINT_GRAPHICS,
-		resources.pipeline
-	);
-
-	vkCmdBindDescriptorSets(
-		command_buffer,
-		VK_PIPELINE_BIND_POINT_GRAPHICS,
-		resources.pipeline_layout,
-		0, // set = 0
-		1,
-		&resources.global_uniform_set,
-		0,
-		nullptr
-	);
+	vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipeline);
 
 	const VkDeviceSize vertex_buffer_offset = 0;
-
 	vkCmdBindVertexBuffers(
-		command_buffer,
-		0,
-		1,
+		command_buffer, 0, 1,
 		&resources.vertex_buffer,
 		&vertex_buffer_offset
 	);
-
 	vkCmdBindIndexBuffer(
 		command_buffer,
 		resources.index_buffer,
@@ -609,14 +604,26 @@ void render(const graphics::internal::FrameData& fd) {
 		VK_INDEX_TYPE_UINT16
 	);
 
-	vkCmdDrawIndexed(
-		command_buffer,
-		static_cast<uint32_t>(octahedron::indices.size()),
-		1,
-		0,
-		0,
-		0
-	);
+	for (const auto& object_resources : resources.objects) {
+		vkCmdBindDescriptorSets(
+			command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS,
+			resources.pipeline_layout,
+			0,
+			1,
+			&object_resources.descriptor_set,
+			0, nullptr
+		);
+
+		vkCmdDrawIndexed(
+			command_buffer,
+			static_cast<uint32_t>(octahedron::indices.size()),
+			1,
+			0,
+			0,
+			0
+		);
+	}
 
 	vkCmdEndRenderPass(command_buffer);
 	if (vkEndCommandBuffer(command_buffer) != VK_SUCCESS) {

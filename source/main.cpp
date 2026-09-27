@@ -75,18 +75,19 @@ int main() {
 	}
 
 	while (!glfwWindowShouldClose(glfw_window)) {
-		const double time = glfwGetTime();
-
 		glfwPollEvents();
 		ImGui_ImplGlfw_NewFrame();
-
 		application::apply_pending_imgui_scale();
-
 		ImGui::NewFrame();
-		application::update(time);
-		ImGui::Render();
 
-		graphics::internal::FrameData fd = graphics::internal::prepare();
+		const auto fd = graphics::internal::prepare();
+		if (fd.command_buffer == VK_NULL_HANDLE) {
+			status = EXIT_FAILURE;
+			break;
+		}
+
+		application::update(glfwGetTime());
+		ImGui::Render();
 		application::render(fd);
 		graphics::internal::submitAndPresent();
 	}
@@ -103,5 +104,5 @@ err_imgui_init:
 err_null_window:
 	glfwTerminate();
 
-	return 0;
+	return status;
 }

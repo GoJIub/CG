@@ -1,8 +1,13 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
+
 #include <glm/glm.hpp>
 
 namespace scene {
+
+inline constexpr std::size_t object_count = 2;
 
 struct GlobalUniforms {
     glm::mat4 model{ 1.0f };
@@ -17,13 +22,10 @@ static_assert(
     sizeof(glm::vec4)
 );
 
-struct SceneSettings {
-	float rotation_speed_degrees = 35.0f;
-	glm::vec3 rotation_axis{ 0.0f, 1.0f, 0.0f };
-
-	glm::vec3 camera_position{ 2.7f, 2.0f, 3.2f };
-	glm::vec3 camera_target{ 0.0f, 0.0f, 0.0f };
-	glm::vec3 camera_up{ 0.0f, 1.0f, 0.0f };
+struct CameraSettings {
+	glm::vec3 position{ 2.7f, 2.0f, 3.2f };
+	glm::vec3 target{ 0.0f, 0.0f, 0.0f };
+	glm::vec3 up{ 0.0f, 1.0f, 0.0f };
 
 	float field_of_view_degrees = 45.0f;
 	float near_plane = 0.1f;
@@ -31,11 +33,16 @@ struct SceneSettings {
 
 	bool use_perspective_projection = true;
 	float orthographic_half_height = 2.2f;
+};
+
+struct ObjectSettings {
+	float rotation_speed_degrees = 35.0f;
+	glm::vec3 rotation_axis{ 0.0f, 1.0f, 0.0f };
 
 	glm::vec3 position{ 0.0f, 0.0f, 0.0f };
 	glm::vec3 scale{ 1.0f, 1.0f, 1.0f };
 
-	float trajectory_radius = 0.8f;
+	float trajectory_radius = 1.2f;
 	float trajectory_height = 0.35f;
 	float trajectory_speed = 1.0f;
 
@@ -51,16 +58,38 @@ struct AnimationState {
 	bool is_playing = true;
 };
 
+struct ObjectState {
+    ObjectSettings settings;
+    AnimationState animation;
+};
+
+enum class TrajectoryCenterMode {
+    ObjectPosition,
+    WorldOrigin
+};
+
+struct SceneState {
+    CameraSettings camera;
+    std::array<ObjectState, object_count> objects;
+	TrajectoryCenterMode center_mode = TrajectoryCenterMode::WorldOrigin;
+
+	SceneState();
+};
+
 void update_animation_state(
-    const SceneSettings& settings,
+    const ObjectSettings& object,
     AnimationState& animation,
     double time
 );
 
 GlobalUniforms compute_global_uniforms(
-    SceneSettings& settings,
+    ObjectSettings& object,
+    const CameraSettings& camera,
     const AnimationState& animation,
+    TrajectoryCenterMode center_mode,
     float aspect_ratio
 );
+
+using SceneUniforms = std::array<GlobalUniforms, object_count>;
 
 } // namespace scene

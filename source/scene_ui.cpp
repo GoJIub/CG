@@ -15,7 +15,6 @@ bool imgui_scale_pending = false;
 ImGuiStyle unscaled_imgui_style{};
 
 void apply_scale(float scale) {
-	// На случай, если старое значение уже было установлено.
 	ImGui::GetIO().FontGlobalScale = 1.0f;
 
 	ImGui::GetStyle() = unscaled_imgui_style;
@@ -43,35 +42,33 @@ void apply_pending_scale() {
 }
 
 void draw_scene_controls(
-    scene::SceneSettings& settings,
-    scene::AnimationState& animation
+    scene::SceneState& state
 ) {
+	static int selected_object_number = 1;
+
 	ImGui::Begin("Scene controls");
 
-	ImGui::SliderFloat(
-		"Rotation speed",
-		&settings.rotation_speed_degrees,
-		-180.0f,
-		180.0f,
-		"%.1f deg/s"
-	);
+	bool orbiting_world_origin =
+		state.center_mode == scene::TrajectoryCenterMode::WorldOrigin;
 
-	ImGui::SliderFloat3(
-		"Rotation axis",
-		&settings.rotation_axis.x,
-		-1.0f,
-		1.0f
-	);
+	if (ImGui::Checkbox(
+		"Orbit around world origin",
+		&orbiting_world_origin
+	)) {
+		state.center_mode = orbiting_world_origin
+			? scene::TrajectoryCenterMode::WorldOrigin
+			: scene::TrajectoryCenterMode::ObjectPosition;
+	}
 
 	ImGui::Checkbox(
 		"Perspective projection",
-		&settings.use_perspective_projection
+		&state.camera.use_perspective_projection
 	);
 
-	if (settings.use_perspective_projection) {
+	if (state.camera.use_perspective_projection) {
 		ImGui::SliderFloat(
 			"Field of view",
-			&settings.field_of_view_degrees,
+			&state.camera.field_of_view_degrees,
 			20.0f,
 			120.0f,
 			"%.1f deg"
@@ -79,25 +76,55 @@ void draw_scene_controls(
 	} else {
 		ImGui::SliderFloat(
 			"Orthographic half height",
-			&settings.orthographic_half_height,
+			&state.camera.orthographic_half_height,
 			0.5f,
 			10.0f,
 			"%.2f"
 		);
 	}
 
-	ImGui::DragFloat3(
-		"Position",
-		&settings.position.x,
-		0.01f,
-		-3.0f,
-		3.0f,
-		"%.2f"
+	ImGui::SliderInt(
+		"Object",
+		&selected_object_number,
+		1,
+		static_cast<int>(scene::object_count)
 	);
+
+	auto& selected = state.objects[
+		static_cast<std::size_t>(selected_object_number - 1)
+	];
+	auto& object = selected.settings;
+	auto& animation = selected.animation;
+
+	ImGui::SliderFloat(
+		"Rotation speed",
+		&object.rotation_speed_degrees,
+		-180.0f,
+		180.0f,
+		"%.1f deg/s"
+	);
+
+	ImGui::SliderFloat3(
+		"Rotation axis",
+		&object.rotation_axis.x,
+		-1.0f,
+		1.0f
+	);
+
+	if (state.center_mode == scene::TrajectoryCenterMode::ObjectPosition) {
+		ImGui::DragFloat3(
+			"Own orbit center position",
+			&object.position.x,
+			0.01f,
+			-3.0f,
+			3.0f,
+			"%.2f"
+		);
+	}
 
 	ImGui::DragFloat3(
 		"Scale",
-		&settings.scale.x,
+		&object.scale.x,
 		0.01f,
 		0.1f,
 		5.0f,
@@ -106,20 +133,20 @@ void draw_scene_controls(
 
 	ImGui::ColorEdit3(
 		"Object color",
-		&settings.object_color.x
+		&object.object_color.x
 	);
 
 	ImGui::SliderFloat(
 		"Trajectory radius",
-		&settings.trajectory_radius,
+		&object.trajectory_radius,
 		0.0f,
-		2.0f,
+		3.0f,
 		"%.2f"
 	);
 
 	ImGui::SliderFloat(
 		"Trajectory height",
-		&settings.trajectory_height,
+		&object.trajectory_height,
 		0.0f,
 		2.0f,
 		"%.2f"
@@ -127,7 +154,7 @@ void draw_scene_controls(
 
 	ImGui::SliderFloat(
 		"Trajectory speed",
-		&settings.trajectory_speed,
+		&object.trajectory_speed,
 		0.0f,
 		4.0f,
 		"%.2f rad/s"
@@ -142,8 +169,7 @@ void draw_scene_controls(
 	}
 
 	if (ImGui::Button("Reset scene")) {
-		settings = scene::SceneSettings{};
-		animation = scene::AnimationState{};
+		state = scene::SceneState{};
 	}
 
 	if (ImGui::SliderFloat(

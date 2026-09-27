@@ -7,8 +7,7 @@ namespace scene_ui {
 void configure();
 void apply_pending_scale();
 void draw_scene_controls(
-    scene::SceneSettings& settings,
-    scene::AnimationState& animation
+    scene::SceneState& state
 );
 
 } // namespace scene_ui
