@@ -1,65 +1,126 @@
-# 🌋 Vulkan Starter App
+# Компьютерная графика
 
-## Getting started
+Учебный проект по курсу «Компьютерная графика», основанный на [Vulkan Starter App](https://github.com/vladeemerr/vulkan-starter-app). Лабораторные развиваются последовательно в одном репозитории.
 
-You need C++ compiler, Vulkan SDK and CMake installed before you can build this project.
+Текущая реализация — лабораторная работа №1 «Основы 3D-графики»: два правильных октаэдра, преобразования и анимация в реальном времени, управление через Dear ImGui.
 
-This project uses C++20 standard and thus requires either of those compilers:
-- GCC 10.X
-- Clang 10
-- Microsoft Visual Studio 2019
+Номер по списку — 26. При 12 вариантах формула `((26 - 1) % 12) + 1` даёт вариант **2 — правильный октаэдр**.
 
-This is officially tested on *Windows* and *GNU/Linux platforms*, no *macOS* support yet.
-If you have a working macOS solution of this code, consider submitting a PR so others
-can build this example code without a hassle!
+## Возможности
 
-<ins>**1. Downloading the repository**</ins>
+- Перспективная и ортографическая проекции с настройкой поля зрения или размера области видимости.
+- Изменение оси и скорости вращения, масштаба и центра траектории выбранного объекта.
+- Пространственная траектория с настройкой радиуса, высоты и скорости; независимая пауза для каждого объекта.
+- Процедурные цвета вершин по локальным координатам и цветовой множитель из `ColorEdit3`.
+- Два объекта с общей геометрией, но отдельными uniform buffers и наборами `VkDescriptorSet`.
+- Выбор центра траектории, масштабирование интерфейса и сброс параметров сцены.
 
-Start by cloning the repository with `git clone --depth 1 https://github.com/vladeemerr/vulkan-starter-app`
+## Сборка в Windows
 
-This repository does not contain any submodules, it utilizes CMake's `FetchContent` feature instead.
+### Требования
 
-<ins>**2. Configuring the project**</ins>
+- Git и CMake 3.20 или новее.
+- Visual Studio 2022 либо Build Tools 2022 с компонентами разработки на C++ и Windows SDK.
+- Vulkan SDK с компилятором шейдеров `glslc`, доступным в `PATH`.
+- Видеокарта и установленный драйвер с поддержкой Vulkan 1.1 или новее.
 
-Run either one of the CMake lines to download dependencies and configure the project:
+Используется C++20. GLFW, vk-bootstrap, Vulkan Memory Allocator, Dear ImGui и GLM загружаются через CMake `FetchContent`. При первой конфигурации нужен доступ к их репозиториям; вручную устанавливать эти библиотеки и инициализировать сабмодули не требуется.
 
-```bash
-cmake --preset debug      # for GNU/Linux (GCC/Clang)
-cmake --preset msvc-debug # for Windows (Visual Studio 2019)
+### Debug
+
+Команды для PowerShell:
+
+```powershell
+git clone https://github.com/GoJIub/CG.git
+cd CG
+cmake --preset msvc-debug
+cmake --build build-debug --config Debug --parallel
+.\build-debug\Debug\vulkan-starter-app.exe
 ```
 
-If you wish to build in `release` mode, change `debug` to `release`.
+Запускайте приложение **из корня репозитория**: шейдеры загружаются по относительным путям `shaders/octahedron.vert.spv` и `shaders/octahedron.frag.spv`.
 
-If changes are made (added/removed files), or if you want to regenerate project files, rerun the command above.
+### Release
 
-<ins>**3. Building**</ins>
-
-To build the project, use the line below. You are most likely using `debug` preset, so
-the directory that will eventually contain your build files is named `build-debug`.
-
-Likewise for `release` that directory will be named `build-release`
-
-Run one those commands, depending on which preset you chose:
-
-```bash
-cmake --build build-debug --parallel # for debug
-cmake --build build-release --parallel # for release
+```powershell
+cmake --preset msvc-release
+cmake --build build-release --config Release --parallel
+.\build-release\Release\vulkan-starter-app.exe
 ```
 
-### Running
+Есть также пресеты `debug` и `release` для Ninja. Они требуют доступных компилятора и Ninja. Не используйте Ninja и Visual Studio в одной папке сборки. Для другого генератора задайте отдельный каталог:
 
-`build-*` directory will contain the executable in one of the subdirectories after successful build.
+```powershell
+cmake --preset debug -B build-ninja-debug
+cmake --build build-ninja-debug --parallel
+.\build-ninja-debug\vulkan-starter-app.exe
+```
 
-For `msvc-{debug|release}` builds output subdirectory is set to `Debug` or `Release` respectively.
-For other configurations output subdirectory is set to `vulkan-starter-app`.
+Для MSVC с Ninja эти команды выполняются в Developer PowerShell / Developer Command Prompt, где настроено окружение компилятора.
 
-**Make sure your working directory is set to the project root!**
-Project root is where this README file resides. Otherwise, the
-code responsible for loading shaders or other resources from files will fail,
-because relative paths are used.
+### Шейдеры
 
-### Compiling shaders
+Если при конфигурации CMake найден `glslc`, шейдеры автоматически компилируются в SPIR-V при сборке приложения. Файлы `.spv` не хранятся в Git. Для ручной компиляции:
 
-`CMakeLists.txt` has a build recipe for compiling shader files
-along with an application. Look for a comment in this file to see
-how to compile your shaders.
+```powershell
+glslc shaders/octahedron.vert -o shaders/octahedron.vert.spv
+glslc shaders/octahedron.frag -o shaders/octahedron.frag.spv
+```
+
+После добавления новых `.cpp` включите их в список исходников в `CMakeLists.txt` и повторите конфигурацию.
+
+## Управление
+
+Все элементы находятся в окне `Scene controls`. Проекция и режим центра траектории общие для сцены; параметры объекта относятся к номеру, выбранному в `Object`.
+
+| Элемент | Действие |
+| --- | --- |
+| `Orbit around world origin` | Включён — движение вокруг `(0, 0, 0)`; выключен — вокруг индивидуального центра |
+| `Perspective projection` | Выбор перспективной или ортографической проекции |
+| `Field of view` / `Orthographic half height` | Параметр выбранной проекции |
+| `Object` | Выбор объекта 1 или 2 |
+| `Rotation speed`, `Rotation axis` | Скорость в градусах в секунду и направление оси вращения |
+| `Own orbit center position` | Индивидуальный центр; доступен при отключённом общем центре |
+| `Scale` | Масштаб по трём осям |
+| `Object color` | Множитель процедурных цветов вершин |
+| `Trajectory radius`, `Trajectory height`, `Trajectory speed` | Форма траектории и скорость изменения фазы в радианах в секунду |
+| `Pause animation` / `Resume animation` | Остановка / продолжение движения и вращения выбранного объекта |
+| `Reset scene` | Возврат параметров обоих объектов, камеры и режима центра к исходным значениям |
+| `Interface scale` | Масштаб интерфейса от 1 до 2.5; начальное значение 1.5 |
+
+Пауза останавливает время анимации, но не редактирование параметров: изменение радиуса, высоты или масштаба сразу меняет изображение даже на паузе. `Reset scene` не сбрасывает масштаб интерфейса.
+
+По умолчанию объекты движутся вокруг общего центра с разностью фаз π. Они находятся на противоположных сторонах в плоскости XZ, но имеют одинаковую высоту. Параметры и пауза независимы, поэтому изменение одного объекта может нарушить эту симметрию.
+
+## Структура проекта
+
+| Файлы | Ответственность |
+| --- | --- |
+| `source/main.cpp` | Создание окна, главный цикл и завершение приложения |
+| `source/graphics_internal.*` | Vulkan-контекст, swapchain, render pass, depth buffer, синхронизация и интеграция ImGui |
+| `source/application.*` | Связь интерфейса, расчёта сцены и рендера |
+| `source/scene.*` | Настройки объектов и камеры, анимация, расчёт матриц |
+| `source/scene_ui.*` | Элементы управления и масштаб интерфейса |
+| `source/octahedron_mesh.*` | Вершины, индексы и описание формата вершины |
+| `source/scene_renderer.*` | Ресурсы сцены, обновление UBO и команды отрисовки |
+| `shaders/octahedron.vert` | Преобразование координат вершины и передача цвета |
+| `shaders/octahedron.frag` | Умножение интерполированного цвета на цвет объекта |
+
+Октаэдр содержит 6 вершин и 8 треугольных граней (24 индекса). Оба объекта используют один vertex buffer, один index buffer и один graphics pipeline. Для каждого объекта выделены собственный uniform buffer и descriptor set с матрицами `model`, `view`, `projection` и цветом.
+
+Матрица модели имеет порядок `T * R * S`: сначала к локальной вершине применяется масштаб, затем вращение и перенос. Вершинный шейдер вычисляет `projection * view * model * position`. Для GLM включён диапазон глубины Vulkan `[0, 1]`, направление экранной оси Y корректируется в матрице проекции.
+
+## Частые проблемы
+
+- **CMake сообщает о несовпадении генераторов.** Выбраны Ninja и Visual Studio для одной папки сборки. Используйте прежний пресет либо отдельный каталог через `-B`.
+- **Приложение закрывается или не находит шейдеры.** Проверьте рабочую директорию и наличие обоих `.spv`. Если `glslc` появился в `PATH` после конфигурации, повторите конфигурацию CMake или соберите шейдеры вручную.
+- **Vulkan-типы подсвечены красным, но сборка проходит.** Убедитесь, что CMake успешно сконфигурирован и расширение C/C++ использует конфигурацию CMake Tools, а не только ручные include paths.
+- **Не удаётся создать Vulkan-устройство.** Проверьте поддержку Vulkan и установленный драйвер видеокарты.
+
+## Лабораторные и история
+
+Работа продолжается в ветке `main`. Завершённые лабораторные планируется отмечать тегами вида `lab1`, `lab2` и далее. Теги будут указывать на конкретные завершённые версии; новые лабораторные развивают предыдущую реализацию.
+
+Каталоги сборки, скомпилированные шейдеры и `imgui.ini` исключены из Git. Локальные отчёты и вспомогательные файлы можно хранить в уже игнорируемом каталоге `tmp/`.
+
+Основа проекта — [Vulkan Starter App](https://github.com/vladeemerr/vulkan-starter-app). Условия использования исходного кода и уведомления сохранены в [LICENSE](LICENSE) и [NOTICE](NOTICE).
