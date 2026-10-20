@@ -22,6 +22,43 @@ void apply_scale(float scale) {
 	ImGui::GetStyle().ScaleAllSizes(scale);
 }
 
+void draw_lighting_controls(scene::SceneState& state) {
+    if (!ImGui::CollapsingHeader(
+        "Lighting",
+        ImGuiTreeNodeFlags_DefaultOpen
+    )) {
+        return;
+    }
+
+    auto& light = state.directional_light;
+
+    ImGui::SliderFloat3(
+        "Light direction",
+        &light.direction.x,
+        -1.0f,
+        1.0f,
+        "%.2f"
+    );
+
+    ImGui::ColorEdit3(
+        "Light color",
+        &light.color.x
+    );
+
+    ImGui::SliderFloat(
+        "Light intensity",
+        &light.intensity,
+        0.0f,
+        3.0f,
+        "%.2f"
+    );
+
+    ImGui::ColorEdit3(
+        "Ambient light",
+        &state.ambient_light.x
+    );
+}
+
 } // namespace
 
 
@@ -83,6 +120,10 @@ void draw_scene_controls(
 		);
 	}
 
+	draw_lighting_controls(state);
+
+	ImGui::Separator();
+
 	ImGui::SliderInt(
 		"Object",
 		&selected_object_number,
@@ -132,8 +173,21 @@ void draw_scene_controls(
 	);
 
 	ImGui::ColorEdit3(
-		"Object color",
-		&object.object_color.x
+		"Albedo",
+		&object.material.albedo.x
+	);
+
+	ImGui::ColorEdit3(
+		"Specular color",
+		&object.material.specular_color.x
+	);
+
+	ImGui::SliderFloat(
+		"Shininess",
+		&object.material.shininess,
+		1.0f,
+		256.0f,
+		"%.0f"
 	);
 
 	ImGui::SliderFloat(

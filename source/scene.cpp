@@ -41,16 +41,80 @@ void update_animation_state(
 	}
 }
 
-GlobalUniforms compute_global_uniforms(
-    ObjectSettings& object,
-    const CameraSettings& camera,
-    const AnimationState& animation,
-    TrajectoryCenterMode center_mode,
+SceneUniformData compute_scene_uniforms(
+    const SceneState& state,
     float aspect_ratio
 ) {
-    scene::GlobalUniforms uniforms{};
+	const auto& camera = state.camera;
+    SceneUniformData uniforms{};
 
-	if (glm::length(object.rotation_axis) <
+    const glm::mat4 view = glm::lookAt(
+        camera.position,
+        camera.target,
+        camera.up
+    );
+
+    glm::mat4 projection{1.0f};
+
+    if (camera.use_perspective_projection) {
+		projection = glm::perspective(
+			glm::radians(camera.field_of_view_degrees),
+			aspect_ratio,
+			camera.near_plane,
+			camera.far_plane
+		);
+	} else {
+		const float half_height =
+			camera.orthographic_half_height;
+
+		const float half_width =
+			aspect_ratio * half_height;
+
+		projection = glm::ortho(
+			-half_width,
+			half_width,
+			-half_height,
+			half_height,
+			camera.near_plane,
+			camera.far_plane
+		);
+	}
+
+    projection[1][1] *= -1.0f;
+
+    uniforms.view_projection = projection * view;
+    uniforms.camera_position = glm::vec4(state.camera.position, 1.0f);
+
+	const auto& light = state.directional_light;
+
+	constexpr float minimum_light_direction_length = 0.0001f;
+
+	glm::vec3 direction = light.direction;
+
+	if (glm::length(direction) < minimum_light_direction_length) {
+		direction = glm::vec3(0.0f, -1.0f, 0.0f);
+	}
+
+	uniforms.directional_light_direction =
+		glm::vec4(glm::normalize(direction), 0.0f);
+
+	uniforms.directional_light_color =
+		glm::vec4(light.color * light.intensity, 0.0f);
+
+	uniforms.ambient_light =
+		glm::vec4(state.ambient_light, 0.0f);
+
+    return uniforms;
+}
+
+ObjectUniformData compute_object_uniforms(
+    ObjectSettings& object,
+    const AnimationState& animation,
+    TrajectoryCenterMode center_mode
+) {
+    ObjectUniformData uniforms{};
+
+    if (glm::length(object.rotation_axis) <
 		minimum_rotation_axis_length) {
 		object.rotation_axis = glm::vec3(0.0f, 1.0f, 0.0f);
 	}
@@ -87,41 +151,15 @@ GlobalUniforms compute_global_uniforms(
 
 	uniforms.model = model;
 
-	uniforms.view = glm::lookAt(
-		camera.position,
-		camera.target,
-		camera.up
+    uniforms.albedo =
+		glm::vec4(object.material.albedo, 1.0f);
+
+	uniforms.specular_shininess = glm::vec4(
+		object.material.specular_color,
+		object.material.shininess
 	);
 
-	if (camera.use_perspective_projection) {
-		uniforms.projection = glm::perspective(
-			glm::radians(camera.field_of_view_degrees),
-			aspect_ratio,
-			camera.near_plane,
-			camera.far_plane
-		);
-	} else {
-		const float half_height =
-			camera.orthographic_half_height;
-
-		const float half_width =
-			aspect_ratio * half_height;
-
-		uniforms.projection = glm::ortho(
-			-half_width,
-			half_width,
-			-half_height,
-			half_height,
-			camera.near_plane,
-			camera.far_plane
-		);
-	}
-
-	// У GLM и Vulkan различается направление оси Y экрана.
-	uniforms.projection[1][1] *= -1.0f;
-
-	uniforms.object_color = object.object_color;
-	return uniforms;
+    return uniforms;
 }
 
 } // namespace scene

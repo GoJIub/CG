@@ -9,19 +9,6 @@ namespace scene {
 
 inline constexpr std::size_t object_count = 2;
 
-struct GlobalUniforms {
-    glm::mat4 model{ 1.0f };
-    glm::mat4 view{ 1.0f };
-    glm::mat4 projection{ 1.0f };
-	glm::vec4 object_color{ 1.0f };
-};
-
-static_assert(
-    sizeof(scene::GlobalUniforms) ==
-    sizeof(glm::mat4) * 3 +
-    sizeof(glm::vec4)
-);
-
 struct CameraSettings {
 	glm::vec3 position{ 2.7f, 2.0f, 3.2f };
 	glm::vec3 target{ 0.0f, 0.0f, 0.0f };
@@ -35,6 +22,12 @@ struct CameraSettings {
 	float orthographic_half_height = 2.2f;
 };
 
+struct MaterialSettings {
+    glm::vec3 albedo{1.0f};
+    glm::vec3 specular_color{0.5f};
+    float shininess = 32.0f;
+};
+
 struct ObjectSettings {
 	float rotation_speed_degrees = 35.0f;
 	glm::vec3 rotation_axis{ 0.0f, 1.0f, 0.0f };
@@ -46,7 +39,7 @@ struct ObjectSettings {
 	float trajectory_height = 0.35f;
 	float trajectory_speed = 1.0f;
 
-	glm::vec4 object_color{ 1.0f, 1.0f, 1.0f, 1.0f };
+	MaterialSettings material;
 };
 
 struct AnimationState {
@@ -68,10 +61,19 @@ enum class TrajectoryCenterMode {
     WorldOrigin
 };
 
+struct DirectionalLightSettings {
+    glm::vec3 direction{-1.0f, -1.0f, -1.0f};
+    glm::vec3 color{1.0f};
+    float intensity = 1.0f;
+};
+
 struct SceneState {
     CameraSettings camera;
     std::array<ObjectState, object_count> objects;
 	TrajectoryCenterMode center_mode = TrajectoryCenterMode::WorldOrigin;
+
+	DirectionalLightSettings directional_light;
+	glm::vec3 ambient_light{0.1f};
 
 	SceneState();
 };
@@ -82,14 +84,45 @@ void update_animation_state(
     double time
 );
 
-GlobalUniforms compute_global_uniforms(
-    ObjectSettings& object,
-    const CameraSettings& camera,
-    const AnimationState& animation,
-    TrajectoryCenterMode center_mode,
+struct SceneUniformData {
+    glm::mat4 view_projection{1.0f};
+    glm::vec4 camera_position{0.0f, 0.0f, 0.0f, 1.0f};
+
+    glm::vec4 directional_light_direction{0.0f};
+    glm::vec4 directional_light_color{0.0f};
+    glm::vec4 ambient_light{0.0f};
+};
+
+struct ObjectUniformData {
+    glm::mat4 model{1.0f};
+    glm::vec4 albedo{1.0f};
+    glm::vec4 specular_shininess{0.0f};
+};
+
+struct FrameUniformData {
+    SceneUniformData scene;
+    std::array<ObjectUniformData, object_count> objects;
+};
+
+static_assert(
+    sizeof(SceneUniformData) ==
+    sizeof(glm::mat4) + sizeof(glm::vec4) * 4
+);
+
+static_assert(
+    sizeof(ObjectUniformData) ==
+    sizeof(glm::mat4) + sizeof(glm::vec4) * 2
+);
+
+SceneUniformData compute_scene_uniforms(
+    const SceneState& state,
     float aspect_ratio
 );
 
-using SceneUniforms = std::array<GlobalUniforms, object_count>;
+ObjectUniformData compute_object_uniforms(
+    ObjectSettings& object,
+    const AnimationState& animation,
+    TrajectoryCenterMode center_mode
+);
 
 } // namespace scene

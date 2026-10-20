@@ -48,14 +48,20 @@ void update(double time) {
 		static_cast<float>(context.swapchain_extent.width) /
 		static_cast<float>(context.swapchain_extent.height);
 
-	scene::SceneUniforms uniforms{};
+	scene::FrameUniformData uniforms{};
+
+	uniforms.scene = scene::compute_scene_uniforms(
+		scene_state,
+		aspect_ratio
+	);
+
 	for (std::size_t i = 0; i < scene_state.objects.size(); ++i) {
-		uniforms[i] = scene::compute_global_uniforms(
-			scene_state.objects[i].settings,
-			scene_state.camera,
-			scene_state.objects[i].animation,
-			scene_state.center_mode,
-			aspect_ratio
+		auto& object = scene_state.objects[i];
+
+		uniforms.objects[i] = scene::compute_object_uniforms(
+			object.settings,
+			object.animation,
+			scene_state.center_mode
 		);
 	}
 

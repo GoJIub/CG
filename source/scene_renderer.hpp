@@ -7,7 +7,7 @@ namespace scene_renderer {
 
 bool initialize();
 void shutdown();
-bool update_uniform_buffers(const scene::SceneUniforms& uniforms);
+bool update_uniform_buffers(const scene::FrameUniformData& uniforms);
 void render(const graphics::internal::FrameData& fd);
 
 } // namespace scene_renderer
