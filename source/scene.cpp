@@ -254,4 +254,49 @@ SpotLightData compute_spot_light_data(
     return data;
 }
 
+glm::mat4 compute_spot_light_cone_model(
+    const SpotLightData& light,
+    float cos_half_angle,
+    float cone_length
+) {
+    const glm::vec3 forward = glm::vec3(light.direction);
+
+    constexpr float parallel_threshold = 0.99f;
+
+    const glm::vec3 helper =
+        glm::abs(forward.y) < parallel_threshold
+            ? glm::vec3(0.0f, 1.0f, 0.0f)
+            : glm::vec3(1.0f, 0.0f, 0.0f);
+
+    const glm::vec3 right =
+        glm::normalize(glm::cross(helper, forward));
+
+    const glm::vec3 up =
+        glm::cross(forward, right);
+
+    glm::mat4 rotation(1.0f);
+    rotation[0] = glm::vec4(right, 0.0f);
+    rotation[1] = glm::vec4(up, 0.0f);
+    rotation[2] = glm::vec4(forward, 0.0f);
+
+    const float half_angle = glm::acos(
+        glm::clamp(cos_half_angle, -1.0f, 1.0f)
+    );
+
+    const float radius =
+        cone_length * glm::tan(half_angle);
+
+    const glm::mat4 translation = glm::translate(
+        glm::mat4(1.0f),
+        glm::vec3(light.position)
+    );
+
+    const glm::mat4 scaling = glm::scale(
+        glm::mat4(1.0f),
+        glm::vec3(radius, radius, cone_length)
+    );
+
+    return translation * rotation * scaling;
+}
+
 } // namespace scene

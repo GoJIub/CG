@@ -96,6 +96,10 @@ struct SceneState {
     std::vector<PointLightSettings> point_lights;
     std::vector<SpotLightSettings> spot_lights;
 
+    bool show_point_light_gizmos = true;
+    bool show_spot_light_gizmos = true;
+    float spot_light_cone_length = 2.0f;
+
 	SceneState();
 };
 
@@ -134,11 +138,18 @@ struct SpotLightData {
     glm::vec4 cone_cosines{0.0f};
 };
 
+struct LightMarkerData {
+    glm::vec3 position{0.0f};
+    glm::vec3 color{1.0f};
+};
+
 struct FrameUniformData {
     SceneUniformData scene;
     std::array<ObjectUniformData, object_count> objects;
     std::vector<PointLightData> point_lights;
     std::vector<SpotLightData> spot_lights;
+    std::vector<LightMarkerData> light_markers;
+    std::vector<glm::mat4> spot_light_cone_models;
 };
 
 static_assert(
@@ -187,6 +198,12 @@ PointLightData compute_point_light_data(
 
 SpotLightData compute_spot_light_data(
     const SpotLightSettings& light
+);
+
+glm::mat4 compute_spot_light_cone_model(
+    const SpotLightData& light,
+    float cos_half_angle,
+    float cone_length
 );
 
 } // namespace scene

@@ -37,7 +37,8 @@ void draw_lighting_controls(scene::SceneState& state) {
         &light.direction.x,
         -1.0f,
         1.0f,
-        "%.2f"
+        "%.2f",
+        ImGuiSliderFlags_AlwaysClamp
     );
 
     ImGui::ColorEdit3(
@@ -50,7 +51,8 @@ void draw_lighting_controls(scene::SceneState& state) {
         &light.intensity,
         0.0f,
         3.0f,
-        "%.2f"
+        "%.2f",
+        ImGuiSliderFlags_AlwaysClamp
     );
 
     ImGui::ColorEdit3(
@@ -78,7 +80,8 @@ void draw_camera_controls(scene::CameraSettings& camera) {
 		&camera.rotation_degrees.x,
 		-89.0f,
 		89.0f,
-		"%.1f deg"
+		"%.1f deg",
+		ImGuiSliderFlags_AlwaysClamp
 	);
 
 	ImGui::SliderFloat(
@@ -86,7 +89,8 @@ void draw_camera_controls(scene::CameraSettings& camera) {
 		&camera.rotation_degrees.y,
 		-180.0f,
 		180.0f,
-		"%.1f deg"
+		"%.1f deg",
+		ImGuiSliderFlags_AlwaysClamp
 	);
 
 	ImGui::SliderFloat(
@@ -94,7 +98,8 @@ void draw_camera_controls(scene::CameraSettings& camera) {
 		&camera.rotation_degrees.z,
 		-180.0f,
 		180.0f,
-		"%.1f deg"
+		"%.1f deg",
+		ImGuiSliderFlags_AlwaysClamp
 	);
 
 	ImGui::Checkbox(
@@ -108,7 +113,8 @@ void draw_camera_controls(scene::CameraSettings& camera) {
 			&camera.field_of_view_degrees,
 			20.0f,
 			120.0f,
-			"%.1f deg"
+			"%.1f deg",
+			ImGuiSliderFlags_AlwaysClamp
 		);
 	} else {
 		ImGui::SliderFloat(
@@ -116,7 +122,8 @@ void draw_camera_controls(scene::CameraSettings& camera) {
 			&camera.orthographic_half_height,
 			0.5f,
 			10.0f,
-			"%.2f"
+			"%.2f",
+			ImGuiSliderFlags_AlwaysClamp
 		);
 	}
 }
@@ -153,14 +160,17 @@ void draw_object_controls(scene::SceneState& state) {
 		&object.rotation_speed_degrees,
 		-180.0f,
 		180.0f,
-		"%.1f deg/s"
+		"%.1f deg/s",
+		ImGuiSliderFlags_AlwaysClamp
 	);
 
 	ImGui::SliderFloat3(
 		"Rotation axis",
 		&object.rotation_axis.x,
 		-1.0f,
-		1.0f
+		1.0f,
+		"%.3f",
+		ImGuiSliderFlags_AlwaysClamp
 	);
 
 	if (state.center_mode == scene::TrajectoryCenterMode::ObjectPosition) {
@@ -170,7 +180,8 @@ void draw_object_controls(scene::SceneState& state) {
 			0.01f,
 			-3.0f,
 			3.0f,
-			"%.2f"
+			"%.2f",
+			ImGuiSliderFlags_AlwaysClamp
 		);
 	}
 
@@ -180,7 +191,8 @@ void draw_object_controls(scene::SceneState& state) {
 		0.01f,
 		0.1f,
 		5.0f,
-		"%.2f"
+		"%.2f",
+		ImGuiSliderFlags_AlwaysClamp
 	);
 
 	ImGui::ColorEdit3(
@@ -198,7 +210,8 @@ void draw_object_controls(scene::SceneState& state) {
 		&object.material.shininess,
 		1.0f,
 		256.0f,
-		"%.0f"
+		"%.0f",
+		ImGuiSliderFlags_AlwaysClamp
 	);
 
 	ImGui::SliderFloat(
@@ -206,7 +219,8 @@ void draw_object_controls(scene::SceneState& state) {
 		&object.trajectory_radius,
 		0.0f,
 		3.0f,
-		"%.2f"
+		"%.2f",
+		ImGuiSliderFlags_AlwaysClamp
 	);
 
 	ImGui::SliderFloat(
@@ -214,7 +228,8 @@ void draw_object_controls(scene::SceneState& state) {
 		&object.trajectory_height,
 		0.0f,
 		2.0f,
-		"%.2f"
+		"%.2f",
+		ImGuiSliderFlags_AlwaysClamp
 	);
 
 	ImGui::SliderFloat(
@@ -222,7 +237,8 @@ void draw_object_controls(scene::SceneState& state) {
 		&object.trajectory_speed,
 		0.0f,
 		4.0f,
-		"%.2f rad/s"
+		"%.2f rad/s",
+		ImGuiSliderFlags_AlwaysClamp
 	);
 
 	if (ImGui::Button(
@@ -303,6 +319,11 @@ void draw_point_lights_controls(scene::SceneState& state) {
             static_cast<std::ptrdiff_t>(remove_index)
         );
     }
+
+	ImGui::Checkbox(
+		"Show visualization",
+		&state.show_point_light_gizmos
+	);
 
     ImGui::PopID();
 }
@@ -407,6 +428,22 @@ void draw_spot_lights_controls(scene::SceneState& state) {
         );
     }
 
+	ImGui::Checkbox(
+		"Show visualization",
+		&state.show_spot_light_gizmos
+	);
+
+	if (state.show_spot_light_gizmos) {
+		ImGui::SliderFloat(
+			"Cone display length",
+			&state.spot_light_cone_length,
+			0.1f,
+			5.0f,
+			"%.2f",
+			ImGuiSliderFlags_AlwaysClamp
+		);
+	}
+
     ImGui::PopID();
 }
 
@@ -463,7 +500,8 @@ void draw_scene_controls(
 		&ui_settings.scale,
 		1.0f,
 		2.5f,
-		"%.2fx"
+		"%.2fx",
+		ImGuiSliderFlags_AlwaysClamp
 	)) {
 		imgui_scale_pending = true;
 	}

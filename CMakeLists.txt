@@ -12,6 +12,8 @@ add_executable(
 	source/scene_renderer.cpp
 	source/scene_ui.cpp
 	source/scene.cpp
+	source/sphere_mesh.cpp
+	"source/cone_mesh.cpp"
 )
 
 if(LINUX)
@@ -118,6 +120,9 @@ if(GLSLC_FOUND)
 
 	compile_shader(octahedron.vert)
 	compile_shader(octahedron.frag)
+
+	compile_shader(light_marker.vert)
+	compile_shader(light_marker.frag)
 
 	add_custom_target(shaders DEPENDS ${_SHADER_BINARIES})
 	add_dependencies(${PROJECT_NAME} shaders)

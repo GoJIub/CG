@@ -1,6 +1,9 @@
 #include "scene_renderer.hpp"
 #include "octahedron_mesh.hpp"
+#include "sphere_mesh.hpp"
+#include "cone_mesh.hpp"
 
+#include <glm/gtc/matrix_transform.hpp>
 #include <vulkan/vulkan.h>
 
 #include <algorithm>
@@ -36,6 +39,36 @@ struct ObjectResources {
     VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
 };
 
+struct MeshResources {
+    VkBuffer vertex_buffer = VK_NULL_HANDLE;
+    VmaAllocation vertex_allocation = nullptr;
+
+    VkBuffer index_buffer = VK_NULL_HANDLE;
+    VmaAllocation index_allocation = nullptr;
+};
+
+struct VertexBufferResources {
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VmaAllocation allocation = nullptr;
+};
+
+struct MarkerPushConstants {
+    glm::mat4 model{1.0f};
+    glm::vec4 color{1.0f};
+};
+
+static_assert(offsetof(MarkerPushConstants, color) == 64);
+static_assert(sizeof(MarkerPushConstants) == 80);
+
+struct MarkerPipelineResources {
+    VkShaderModule vertex_shader = VK_NULL_HANDLE;
+    VkShaderModule fragment_shader = VK_NULL_HANDLE;
+
+    VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    VkPipeline cone_pipeline = VK_NULL_HANDLE;
+};
+
 struct Resources {
 	VkShaderModule vertex_shader = VK_NULL_HANDLE;
 	VkShaderModule fragment_shader = VK_NULL_HANDLE;
@@ -57,6 +90,10 @@ struct Resources {
 	std::array<ObjectResources, scene::object_count> objects{};
 
 	SceneResources scene{};
+
+	MeshResources sphere_mesh;
+	VertexBufferResources cone_vertices;
+	MarkerPipelineResources markers;
 };
 
 Resources resources;
@@ -147,35 +184,34 @@ bool write_buffer(
     return true;
 }
 
-bool create_graphics_pipeline() {
+bool create_graphics_pipeline(
+    VkShaderModule vertex_shader,
+    VkShaderModule fragment_shader,
+    const VkPipelineVertexInputStateCreateInfo& vertex_input_info,
+    VkPipelineLayout pipeline_layout,
+    VkPipeline& out_pipeline,
+    VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+) {
 	auto& context = graphics::internal::context;
 
 	std::array<VkPipelineShaderStageCreateInfo, 2> shader_stages{
 		VkPipelineShaderStageCreateInfo{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
 			.stage = VK_SHADER_STAGE_VERTEX_BIT,
-			.module = resources.vertex_shader,
+			.module = vertex_shader,
 			.pName = "main"
 		},
 		VkPipelineShaderStageCreateInfo{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
 			.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-			.module = resources.fragment_shader,
+			.module = fragment_shader,
 			.pName = "main"
 		}
 	};
 
-	VkPipelineVertexInputStateCreateInfo vertex_input_info{
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-		.vertexBindingDescriptionCount = 1,
-		.pVertexBindingDescriptions = &octahedron::vertex_binding_description,
-		.vertexAttributeDescriptionCount = static_cast<uint32_t>(octahedron::vertex_attribute_descriptions.size()),
-		.pVertexAttributeDescriptions = octahedron::vertex_attribute_descriptions.data()
-	};
-
 	VkPipelineInputAssemblyStateCreateInfo input_assembly_info{
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-		.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+		.topology = topology,
 		.primitiveRestartEnable = VK_FALSE
 	};
 
@@ -241,7 +277,7 @@ bool create_graphics_pipeline() {
 		.pDepthStencilState = &depth_stencil_info,
 		.pColorBlendState = &color_blend_info,
 		.pDynamicState = &dynamic_state_info,
-		.layout = resources.pipeline_layout,
+		.layout = pipeline_layout,
 		.renderPass = context.render_pass,
 		.subpass = 0
 	};
@@ -252,7 +288,7 @@ bool create_graphics_pipeline() {
 		1,
 		&pipeline_info,
 		nullptr,
-		&resources.pipeline
+		&out_pipeline
 	) != VK_SUCCESS) {
 		std::cerr << "Failed to create graphics pipeline\n";
 		return false;
@@ -308,6 +344,32 @@ VkShaderModule loadShaderModule(const char path[]) {
 
 void destroy_resources() {
 	auto& context = graphics::internal::context;
+
+	if (resources.markers.cone_pipeline != VK_NULL_HANDLE) {
+		vkDestroyPipeline(
+			context.device,
+			resources.markers.cone_pipeline,
+			nullptr
+		);
+		resources.markers.cone_pipeline = VK_NULL_HANDLE;
+	}
+
+	if (resources.markers.pipeline != VK_NULL_HANDLE) {
+		vkDestroyPipeline(
+			context.device,
+			resources.markers.pipeline,
+			nullptr
+		);
+		resources.markers.pipeline = VK_NULL_HANDLE;
+	}
+	if (resources.markers.pipeline_layout != VK_NULL_HANDLE) {
+		vkDestroyPipelineLayout(
+			context.device,
+			resources.markers.pipeline_layout,
+			nullptr
+		);
+		resources.markers.pipeline_layout = VK_NULL_HANDLE;
+	}
 
 	if (resources.pipeline != VK_NULL_HANDLE) {
 		vkDestroyPipeline(
@@ -405,24 +467,90 @@ void destroy_resources() {
 		}
 	}
 
+	if (resources.cone_vertices.buffer != VK_NULL_HANDLE) {
+		vmaDestroyBuffer(
+			context.allocator,
+			resources.cone_vertices.buffer,
+			resources.cone_vertices.allocation
+		);
+		resources.cone_vertices.buffer = VK_NULL_HANDLE;
+		resources.cone_vertices.allocation = nullptr;
+	}
+
+	if (resources.sphere_mesh.vertex_buffer != VK_NULL_HANDLE) {
+		vmaDestroyBuffer(
+			context.allocator,
+			resources.sphere_mesh.vertex_buffer,
+			resources.sphere_mesh.vertex_allocation
+		);
+
+		resources.sphere_mesh.vertex_buffer = VK_NULL_HANDLE;
+		resources.sphere_mesh.vertex_allocation = nullptr;
+	}
+
+	if (resources.sphere_mesh.index_buffer != VK_NULL_HANDLE) {
+		vmaDestroyBuffer(
+			context.allocator,
+			resources.sphere_mesh.index_buffer,
+			resources.sphere_mesh.index_allocation
+		);
+
+		resources.sphere_mesh.index_buffer = VK_NULL_HANDLE;
+		resources.sphere_mesh.index_allocation = nullptr;
+	}
+
 	if (resources.vertex_buffer != VK_NULL_HANDLE) {
-		vmaDestroyBuffer(context.allocator, resources.vertex_buffer, resources.vertex_buffer_allocation);
+		vmaDestroyBuffer(
+			context.allocator,
+			resources.vertex_buffer,
+			resources.vertex_buffer_allocation
+		);
 		resources.vertex_buffer = VK_NULL_HANDLE;
 		resources.vertex_buffer_allocation = nullptr;
 	}
 	if (resources.index_buffer != VK_NULL_HANDLE) {
-		vmaDestroyBuffer(context.allocator, resources.index_buffer, resources.index_buffer_allocation);
+		vmaDestroyBuffer(
+			context.allocator,
+			resources.index_buffer,
+			resources.index_buffer_allocation
+		);
 		resources.index_buffer = VK_NULL_HANDLE;
 		resources.index_buffer_allocation = nullptr;
 	}
 
+	if (resources.markers.vertex_shader != VK_NULL_HANDLE) {
+		vkDestroyShaderModule(
+			context.device,
+			resources.markers.vertex_shader,
+			nullptr
+		);
+		resources.markers.vertex_shader = VK_NULL_HANDLE;
+	}
+
+	if (resources.markers.fragment_shader != VK_NULL_HANDLE) {
+		vkDestroyShaderModule(
+			context.device,
+			resources.markers.fragment_shader,
+			nullptr
+		);
+		resources.markers.fragment_shader = VK_NULL_HANDLE;
+	}
+
 	if (resources.vertex_shader != VK_NULL_HANDLE) {
-		vkDestroyShaderModule(context.device, resources.vertex_shader, nullptr);
+		vkDestroyShaderModule(
+			context.device,
+			resources.vertex_shader,
+			nullptr
+		);
 		resources.vertex_shader = VK_NULL_HANDLE;
 	}
 
 	if (resources.fragment_shader != VK_NULL_HANDLE) {
-		vkDestroyShaderModule(context.device, resources.fragment_shader, nullptr);
+		vkDestroyShaderModule(
+			context.device,
+			resources.fragment_shader,
+			nullptr
+		);
 		resources.fragment_shader = VK_NULL_HANDLE;
 	}
 }
@@ -535,6 +663,144 @@ bool ensure_storage_buffer_capacity(
     return true;
 }
 
+void render_light_markers(
+    VkCommandBuffer command_buffer,
+    const std::vector<scene::LightMarkerData>& markers
+) {
+    if (markers.empty()) {
+        return;
+    }
+
+    vkCmdBindPipeline(
+        command_buffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        resources.markers.pipeline
+    );
+
+    const VkDeviceSize vertex_offset = 0;
+
+    vkCmdBindVertexBuffers(
+        command_buffer,
+        0,
+        1,
+        &resources.sphere_mesh.vertex_buffer,
+        &vertex_offset
+    );
+
+    vkCmdBindIndexBuffer(
+        command_buffer,
+        resources.sphere_mesh.index_buffer,
+        0,
+        VK_INDEX_TYPE_UINT32
+    );
+
+    vkCmdBindDescriptorSets(
+        command_buffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        resources.markers.pipeline_layout,
+        0,
+        1,
+        &resources.scene.descriptor_set,
+        0,
+        nullptr
+    );
+
+    constexpr float marker_radius = 0.08f;
+
+    for (const auto& marker : markers) {
+        MarkerPushConstants constants{};
+
+        constants.model = glm::translate(
+            glm::mat4(1.0f),
+            marker.position
+        );
+
+        constants.model = glm::scale(
+            constants.model,
+            glm::vec3(marker_radius)
+        );
+
+        constants.color = glm::vec4(marker.color, 1.0f);
+
+        vkCmdPushConstants(
+            command_buffer,
+            resources.markers.pipeline_layout,
+            VK_SHADER_STAGE_VERTEX_BIT,
+            0,
+            sizeof(constants),
+            &constants
+        );
+
+        vkCmdDrawIndexed(
+            command_buffer,
+            static_cast<std::uint32_t>(sphere::indices.size()),
+            1,
+            0,
+            0,
+            0
+        );
+    }
+}
+
+void render_spot_light_cones(
+    VkCommandBuffer command_buffer,
+    const std::vector<glm::mat4>& models
+) {
+    if (models.empty()) {
+        return;
+    }
+
+    vkCmdBindPipeline(
+        command_buffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        resources.markers.cone_pipeline
+    );
+
+    const VkDeviceSize vertex_offset = 0;
+
+    vkCmdBindVertexBuffers(
+        command_buffer,
+        0,
+        1,
+        &resources.cone_vertices.buffer,
+        &vertex_offset
+    );
+
+    vkCmdBindDescriptorSets(
+        command_buffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        resources.markers.pipeline_layout,
+        0,
+        1,
+        &resources.scene.descriptor_set,
+        0,
+        nullptr
+    );
+
+    for (const auto& model : models) {
+        MarkerPushConstants constants{};
+        constants.model = model;
+        constants.color = glm::vec4(1.0f);
+
+        vkCmdPushConstants(
+            command_buffer,
+            resources.markers.pipeline_layout,
+            VK_SHADER_STAGE_VERTEX_BIT,
+            0,
+            sizeof(constants),
+            &constants
+        );
+
+        vkCmdDraw(
+            command_buffer,
+            static_cast<std::uint32_t>(cone::vertices.size()),
+            1,
+            0,
+            0
+        );
+    }
+}
+
 } // namespace
 
 
@@ -550,6 +816,22 @@ bool initialize() {
 
 	resources.fragment_shader = loadShaderModule("shaders/octahedron.frag.spv");
 	if (resources.fragment_shader == VK_NULL_HANDLE) {
+		destroy_resources();
+		return false;
+	}
+
+	resources.markers.vertex_shader =
+		loadShaderModule("shaders/light_marker.vert.spv");
+
+	if (resources.markers.vertex_shader == VK_NULL_HANDLE) {
+		destroy_resources();
+		return false;
+	}
+
+	resources.markers.fragment_shader =
+		loadShaderModule("shaders/light_marker.frag.spv");
+
+	if (resources.markers.fragment_shader == VK_NULL_HANDLE) {
 		destroy_resources();
 		return false;
 	}
@@ -571,6 +853,39 @@ bool initialize() {
 		octahedron::indices.data(),
 		resources.index_buffer,
 		resources.index_buffer_allocation
+	)) {
+		destroy_resources();
+		return false;
+	}
+
+	if (!create_buffer(
+		sizeof(sphere::vertices),
+		VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+		sphere::vertices.data(),
+		resources.sphere_mesh.vertex_buffer,
+		resources.sphere_mesh.vertex_allocation
+	)) {
+		destroy_resources();
+		return false;
+	}
+
+	if (!create_buffer(
+		sizeof(sphere::indices),
+		VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+		sphere::indices.data(),
+		resources.sphere_mesh.index_buffer,
+		resources.sphere_mesh.index_allocation
+	)) {
+		destroy_resources();
+		return false;
+	}
+
+	if (!create_buffer(
+		sizeof(cone::vertices),
+		VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+		cone::vertices.data(),
+		resources.cone_vertices.buffer,
+		resources.cone_vertices.allocation
 	)) {
 		destroy_resources();
 		return false;
@@ -846,7 +1161,99 @@ bool initialize() {
 		return false;
 	}
 
-	if (!create_graphics_pipeline()) {
+	const VkPushConstantRange marker_push_constant_range{
+		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+		.offset = 0,
+		.size = sizeof(MarkerPushConstants)
+	};
+
+	const VkPipelineLayoutCreateInfo marker_layout_info{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+		.setLayoutCount = 1,
+		.pSetLayouts = &resources.scene_set_layout,
+		.pushConstantRangeCount = 1,
+		.pPushConstantRanges = &marker_push_constant_range
+	};
+
+	if (vkCreatePipelineLayout(
+		context.device,
+		&marker_layout_info,
+		nullptr,
+		&resources.markers.pipeline_layout
+	) != VK_SUCCESS) {
+		std::cerr << "Failed to create marker pipeline layout\n";
+		destroy_resources();
+		return false;
+	}
+
+	VkPipelineVertexInputStateCreateInfo vertex_input_info{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+		.vertexBindingDescriptionCount = 1,
+		.pVertexBindingDescriptions =
+			&octahedron::vertex_binding_description,
+		.vertexAttributeDescriptionCount =
+			static_cast<uint32_t>(
+				octahedron::vertex_attribute_descriptions.size()
+			),
+		.pVertexAttributeDescriptions =
+			octahedron::vertex_attribute_descriptions.data()
+	};
+
+	const VkPipelineVertexInputStateCreateInfo marker_vertex_input_info{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+		.vertexBindingDescriptionCount = 1,
+		.pVertexBindingDescriptions =
+			&sphere::vertex_binding_description,
+		.vertexAttributeDescriptionCount =
+			static_cast<std::uint32_t>(
+				sphere::vertex_attribute_descriptions.size()
+			),
+		.pVertexAttributeDescriptions =
+			sphere::vertex_attribute_descriptions.data()
+	};
+
+	const VkPipelineVertexInputStateCreateInfo cone_vertex_input_info{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+		.vertexBindingDescriptionCount = 1,
+		.pVertexBindingDescriptions = &cone::vertex_binding_description,
+		.vertexAttributeDescriptionCount =
+			static_cast<std::uint32_t>(
+				cone::vertex_attribute_descriptions.size()
+			),
+		.pVertexAttributeDescriptions =
+			cone::vertex_attribute_descriptions.data()
+	};
+
+	if (!create_graphics_pipeline(
+		resources.vertex_shader,
+		resources.fragment_shader,
+		vertex_input_info,
+		resources.pipeline_layout,
+		resources.pipeline
+	)) {
+		destroy_resources();
+		return false;
+	}
+
+	if (!create_graphics_pipeline(
+		resources.markers.vertex_shader,
+		resources.markers.fragment_shader,
+		marker_vertex_input_info,
+		resources.markers.pipeline_layout,
+		resources.markers.pipeline
+	)) {
+		destroy_resources();
+		return false;
+	}
+
+	if (!create_graphics_pipeline(
+		resources.markers.vertex_shader,
+		resources.markers.fragment_shader,
+		cone_vertex_input_info,
+		resources.markers.pipeline_layout,
+		resources.markers.cone_pipeline,
+		VK_PRIMITIVE_TOPOLOGY_LINE_LIST
+	)) {
 		destroy_resources();
 		return false;
 	}
@@ -924,7 +1331,10 @@ bool update_uniform_buffers(const scene::FrameUniformData& uniforms) {
     return true;
 }
 
-void render(const graphics::internal::FrameData& fd) {
+void render(
+    const graphics::internal::FrameData& fd,
+    const scene::FrameUniformData& uniforms
+) {
 	auto& context = graphics::internal::context;
 
 	VkCommandBuffer command_buffer = fd.command_buffer;
@@ -1020,6 +1430,16 @@ void render(const graphics::internal::FrameData& fd) {
 			0
 		);
 	}
+
+	render_light_markers(
+		command_buffer,
+		uniforms.light_markers
+	);
+
+	render_spot_light_cones(
+		command_buffer,
+		uniforms.spot_light_cone_models
+	);
 
 	vkCmdEndRenderPass(command_buffer);
 	if (vkEndCommandBuffer(command_buffer) != VK_SUCCESS) {

@@ -82,6 +82,54 @@ bool update(double time) {
 		);
 	}
 
+	auto& markers = uniforms.light_markers;
+	markers.clear();
+
+	if (scene_state.show_point_light_gizmos) {
+		for (const auto& light : scene_state.point_lights) {
+			markers.push_back({
+				light.position,
+				light.color
+			});
+		}
+	}
+
+	if (scene_state.show_spot_light_gizmos) {
+		for (const auto& light : scene_state.spot_lights) {
+			markers.push_back({
+				light.position,
+				light.color
+			});
+		}
+	}
+
+	auto& cone_models = uniforms.spot_light_cone_models;
+	cone_models.clear();
+
+	if (scene_state.show_spot_light_gizmos) {
+		cone_models.reserve(uniforms.spot_lights.size() * 2);
+
+		for (const auto& light : uniforms.spot_lights) {
+			cone_models.push_back(
+				scene::compute_spot_light_cone_model(
+					light,
+					light.cone_cosines.y,
+					scene_state.spot_light_cone_length
+				)
+			);
+
+			if (light.cone_cosines.x > light.cone_cosines.y) {
+				cone_models.push_back(
+					scene::compute_spot_light_cone_model(
+						light,
+						light.cone_cosines.x,
+						scene_state.spot_light_cone_length
+					)
+				);
+			}
+		}
+	}
+
 	if (!scene_renderer::update_uniform_buffers(uniforms)) {
 		return false;
 	}
@@ -90,7 +138,7 @@ bool update(double time) {
 }
 
 void render(const graphics::internal::FrameData& fd) {
-    scene_renderer::render(fd);
+    scene_renderer::render(fd, frame_uniforms);
 }
 
 } // namespace application
