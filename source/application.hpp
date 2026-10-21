@@ -10,7 +10,7 @@ void apply_pending_imgui_scale();
 bool initialize();
 void shutdown();
 
-void update(double time);
+bool update(double time);
 void render(const graphics::internal::FrameData& fd);
 
 } // namespace application

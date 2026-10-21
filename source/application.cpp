@@ -6,6 +6,7 @@
 namespace {
 
 scene::SceneState scene_state;
+scene::FrameUniformData frame_uniforms{};
 
 }
 
@@ -27,13 +28,13 @@ void shutdown() {
     scene_renderer::shutdown();
 }
 
-void update(double time) {
+bool update(double time) {
 	scene_ui::draw_scene_controls(scene_state);
 
 	auto& context = graphics::internal::context;
 
 	if (context.swapchain_extent.height == 0) {
-		return;
+		return true;
 	}
 
 	for (std::size_t i = 0; i < scene_state.objects.size(); ++i) {
@@ -48,7 +49,7 @@ void update(double time) {
 		static_cast<float>(context.swapchain_extent.width) /
 		static_cast<float>(context.swapchain_extent.height);
 
-	scene::FrameUniformData uniforms{};
+	auto& uniforms = frame_uniforms;
 
 	uniforms.scene = scene::compute_scene_uniforms(
 		scene_state,
@@ -65,7 +66,19 @@ void update(double time) {
 		);
 	}
 
-	scene_renderer::update_uniform_buffers(uniforms);
+	uniforms.point_lights.resize(scene_state.point_lights.size());
+
+	for (std::size_t i = 0; i < scene_state.point_lights.size(); ++i) {
+		uniforms.point_lights[i] = scene::compute_point_light_data(
+			scene_state.point_lights[i]
+		);
+	}
+
+	if (!scene_renderer::update_uniform_buffers(uniforms)) {
+		return false;
+	}
+
+	return true;
 }
 
 void render(const graphics::internal::FrameData& fd) {

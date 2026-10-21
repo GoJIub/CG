@@ -2,6 +2,8 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
+#include <vector>
 
 #include <glm/glm.hpp>
 
@@ -66,6 +68,12 @@ struct DirectionalLightSettings {
     float intensity = 1.0f;
 };
 
+struct PointLightSettings {
+    glm::vec3 position{2.0f, 2.0f, 2.0f};
+    glm::vec3 color{1.0f};
+    float intensity = 3.0f;
+};
+
 struct SceneState {
     CameraSettings camera;
     std::array<ObjectState, object_count> objects;
@@ -73,6 +81,8 @@ struct SceneState {
 
 	DirectionalLightSettings directional_light;
 	glm::vec3 ambient_light{0.1f};
+
+    std::vector<PointLightSettings> point_lights;
 
 	SceneState();
 };
@@ -90,6 +100,8 @@ struct SceneUniformData {
     glm::vec4 directional_light_direction{0.0f};
     glm::vec4 directional_light_color{0.0f};
     glm::vec4 ambient_light{0.0f};
+
+    glm::uvec4 light_counts{0u};
 };
 
 struct ObjectUniformData {
@@ -98,14 +110,30 @@ struct ObjectUniformData {
     glm::vec4 specular_shininess{0.0f};
 };
 
+struct PointLightData {
+    glm::vec4 position{0.0f, 0.0f, 0.0f, 1.0f};
+    glm::vec4 color{0.0f};
+};
+
 struct FrameUniformData {
     SceneUniformData scene;
     std::array<ObjectUniformData, object_count> objects;
+    std::vector<PointLightData> point_lights;
 };
 
 static_assert(
+    sizeof(PointLightData) == sizeof(glm::vec4) * 2
+);
+
+static_assert(
+    offsetof(PointLightData, color) == sizeof(glm::vec4)
+);
+
+static_assert(
     sizeof(SceneUniformData) ==
-    sizeof(glm::mat4) + sizeof(glm::vec4) * 4
+    sizeof(glm::mat4) +
+    sizeof(glm::vec4) * 4 +
+    sizeof(glm::uvec4)
 );
 
 static_assert(
@@ -122,6 +150,10 @@ ObjectUniformData compute_object_uniforms(
     ObjectSettings& object,
     const AnimationState& animation,
     TrajectoryCenterMode center_mode
+);
+
+PointLightData compute_point_light_data(
+    const PointLightSettings& light
 );
 
 } // namespace scene

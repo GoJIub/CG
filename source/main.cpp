@@ -86,7 +86,11 @@ int main() {
 			break;
 		}
 
-		application::update(glfwGetTime());
+		if (!application::update(glfwGetTime())) {
+			ImGui::EndFrame();
+			status = EXIT_FAILURE;
+			break;
+		}
 		ImGui::Render();
 		application::render(fd);
 		graphics::internal::submitAndPresent();

@@ -11,6 +11,8 @@ layout(std140, set = 0, binding = 0) uniform SceneUniformData {
     vec4 directional_light_direction;
     vec4 directional_light_color;
     vec4 ambient_light;
+
+    uvec4 light_counts;
 } scene_data;
 
 layout(std140, set = 1, binding = 0) uniform ObjectUniformData {

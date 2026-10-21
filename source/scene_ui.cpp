@@ -46,7 +46,7 @@ void draw_lighting_controls(scene::SceneState& state) {
     );
 
     ImGui::SliderFloat(
-        "Light intensity",
+        "Directional intensity",
         &light.intensity,
         0.0f,
         3.0f,
@@ -121,54 +121,25 @@ void draw_camera_controls(scene::CameraSettings& camera) {
 	}
 }
 
-} // namespace
+void draw_object_controls(scene::SceneState& state) {
+	if (!ImGui::CollapsingHeader(
+        "Objects",
+        ImGuiTreeNodeFlags_DefaultOpen
+    )) {
+        return;
+    }
 
+    ImGui::PushID("Objects");
 
-namespace scene_ui {
-
-void configure() {
-	unscaled_imgui_style = ImGui::GetStyle();
-	apply_scale(ui_settings.scale);
-}
-
-void apply_pending_scale() {
-	if (!imgui_scale_pending) {
-		return;
-	}
-
-	apply_scale(ui_settings.scale);
-	imgui_scale_pending = false;
-}
-
-void draw_scene_controls(
-    scene::SceneState& state
-) {
 	static int selected_object_number = 1;
-
-	ImGui::Begin("Scene controls");
-
-	bool orbiting_world_origin =
-		state.center_mode == scene::TrajectoryCenterMode::WorldOrigin;
-
-	if (ImGui::Checkbox(
-		"Orbit around world origin",
-		&orbiting_world_origin
-	)) {
-		state.center_mode = orbiting_world_origin
-			? scene::TrajectoryCenterMode::WorldOrigin
-			: scene::TrajectoryCenterMode::ObjectPosition;
-	}
-
-	draw_camera_controls(state.camera);
-	draw_lighting_controls(state);
-
-	ImGui::Separator();
 
 	ImGui::SliderInt(
 		"Object",
 		&selected_object_number,
 		1,
-		static_cast<int>(scene::object_count)
+		static_cast<int>(scene::object_count),
+		"%d",
+		ImGuiSliderFlags_AlwaysClamp
 	);
 
 	auto& selected = state.objects[
@@ -261,6 +232,123 @@ void draw_scene_controls(
 	)) {
 		animation.is_playing = !animation.is_playing;
 	}
+
+	ImGui::PopID();
+}
+
+void draw_point_lights_controls(scene::SceneState& state) {
+    if (!ImGui::CollapsingHeader(
+        "Point lights",
+        ImGuiTreeNodeFlags_DefaultOpen
+    )) {
+        return;
+    }
+
+    ImGui::PushID("PointLights");
+
+    auto& lights = state.point_lights;
+
+    if (ImGui::Button("Add point light")) {
+        lights.emplace_back();
+    }
+
+    ImGui::Text("Count: %zu", lights.size());
+
+    std::size_t remove_index = lights.size();
+
+    for (std::size_t i = 0; i < lights.size(); ++i) {
+        ImGui::PushID(static_cast<int>(i));
+
+        if (ImGui::TreeNodeEx(
+            "Light",
+            ImGuiTreeNodeFlags_DefaultOpen,
+            "Point light %zu",
+            i + 1
+        )) {
+            auto& light = lights[i];
+
+            ImGui::DragFloat3(
+				"Position",
+				&light.position.x,
+				0.05f
+			);
+
+			ImGui::ColorEdit3(
+				"Color",
+				&light.color.x
+			);
+
+			ImGui::SliderFloat(
+				"Intensity",
+				&light.intensity,
+				0.0f,
+				20.0f,
+				"%.2f",
+				ImGuiSliderFlags_AlwaysClamp
+			);
+
+            if (ImGui::Button("Remove")) {
+                remove_index = i;
+            }
+
+            ImGui::TreePop();
+        }
+
+        ImGui::PopID();
+    }
+
+    if (remove_index < lights.size()) {
+        lights.erase(
+            lights.begin() +
+            static_cast<std::ptrdiff_t>(remove_index)
+        );
+    }
+
+    ImGui::PopID();
+}
+
+} // namespace
+
+
+namespace scene_ui {
+
+void configure() {
+	unscaled_imgui_style = ImGui::GetStyle();
+	apply_scale(ui_settings.scale);
+}
+
+void apply_pending_scale() {
+	if (!imgui_scale_pending) {
+		return;
+	}
+
+	apply_scale(ui_settings.scale);
+	imgui_scale_pending = false;
+}
+
+void draw_scene_controls(
+    scene::SceneState& state
+) {
+	ImGui::Begin("Scene controls");
+
+	bool orbiting_world_origin =
+		state.center_mode == scene::TrajectoryCenterMode::WorldOrigin;
+
+	if (ImGui::Checkbox(
+		"Orbit around world origin",
+		&orbiting_world_origin
+	)) {
+		state.center_mode = orbiting_world_origin
+			? scene::TrajectoryCenterMode::WorldOrigin
+			: scene::TrajectoryCenterMode::ObjectPosition;
+	}
+
+	draw_camera_controls(state.camera);
+	draw_lighting_controls(state);
+	draw_object_controls(state);
+	draw_point_lights_controls(state);
+
+	ImGui::Separator();
 
 	if (ImGui::Button("Reset scene")) {
 		state = scene::SceneState{};

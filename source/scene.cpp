@@ -21,6 +21,8 @@ SceneState::SceneState() {
     objects[0].settings.position.x = -half_spacing;
     objects[1].settings.position.x =  half_spacing;
 	objects[1].animation.trajectory_phase = glm::pi<float>();
+
+	point_lights.emplace_back();
 }
 
 void update_animation_state(
@@ -134,6 +136,9 @@ SceneUniformData compute_scene_uniforms(
 	uniforms.ambient_light =
 		glm::vec4(state.ambient_light, 0.0f);
 
+	uniforms.light_counts.x =
+		static_cast<std::uint32_t>(state.point_lights.size());
+
     return uniforms;
 }
 
@@ -190,6 +195,20 @@ ObjectUniformData compute_object_uniforms(
 	);
 
     return uniforms;
+}
+
+PointLightData compute_point_light_data(
+    const PointLightSettings& light
+) {
+    PointLightData data{};
+
+    data.position = glm::vec4(light.position, 1.0f);
+    data.color = glm::vec4(
+        light.color * light.intensity,
+        0.0f
+    );
+
+    return data;
 }
 
 } // namespace scene

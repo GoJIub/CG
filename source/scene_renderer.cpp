@@ -3,6 +3,7 @@
 
 #include <vulkan/vulkan.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -18,6 +19,9 @@ struct SceneResources {
     VkBuffer uniform_buffer = VK_NULL_HANDLE;
     VmaAllocation uniform_allocation = nullptr;
     VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
+	VkBuffer point_lights_buffer = VK_NULL_HANDLE;
+	VmaAllocation point_lights_allocation = nullptr;
+	std::size_t point_lights_capacity = 0;
 };
 
 struct ObjectResources {
@@ -86,19 +90,21 @@ bool create_buffer(
 		return false;
 	}
 
-	std::memcpy(allocation_info.pMappedData, source_data, static_cast<size_t>(size));
+	if (source_data != nullptr) {
+		std::memcpy(allocation_info.pMappedData, source_data, static_cast<size_t>(size));
 
-	vmaFlushAllocation(
-		graphics::internal::context.allocator,
-		out_allocation,
-		0,
-		size
-	);
+		vmaFlushAllocation(
+			graphics::internal::context.allocator,
+			out_allocation,
+			0,
+			size
+		);
+	}
 
 	return true;
 }
 
-bool write_uniform_buffer(
+bool write_buffer(
     VmaAllocation allocation,
     const void* source,
     std::size_t size
@@ -112,7 +118,7 @@ bool write_uniform_buffer(
         allocation,
         &mapped_data
     ) != VK_SUCCESS) {
-        std::cerr << "Failed to map uniform buffer\n";
+        std::cerr << "Failed to map buffer\n";
         return false;
     }
 
@@ -128,7 +134,7 @@ bool write_uniform_buffer(
     vmaUnmapMemory(context.allocator, allocation);
 
     if (result != VK_SUCCESS) {
-        std::cerr << "Failed to flush uniform buffer\n";
+        std::cerr << "Failed to flush buffer\n";
         return false;
     }
 
@@ -357,6 +363,18 @@ void destroy_resources() {
 		resources.scene.uniform_allocation = nullptr;
 	}
 
+	if (resources.scene.point_lights_buffer != VK_NULL_HANDLE) {
+		vmaDestroyBuffer(
+			context.allocator,
+			resources.scene.point_lights_buffer,
+			resources.scene.point_lights_allocation
+		);
+
+		resources.scene.point_lights_buffer = VK_NULL_HANDLE;
+		resources.scene.point_lights_allocation = nullptr;
+		resources.scene.point_lights_capacity = 0;
+	}
+
 	for (auto& object_resources : resources.objects) {
 		if (object_resources.uniform_buffer != VK_NULL_HANDLE) {
 			vmaDestroyBuffer(
@@ -389,6 +407,104 @@ void destroy_resources() {
 		vkDestroyShaderModule(context.device, resources.fragment_shader, nullptr);
 		resources.fragment_shader = VK_NULL_HANDLE;
 	}
+}
+
+void update_point_lights_descriptor() {
+    const VkDescriptorBufferInfo buffer_info{
+        .buffer = resources.scene.point_lights_buffer,
+        .offset = 0,
+        .range =
+            static_cast<VkDeviceSize>(
+                resources.scene.point_lights_capacity
+            ) * sizeof(scene::PointLightData)
+    };
+
+    const VkWriteDescriptorSet write{
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = resources.scene.descriptor_set,
+        .dstBinding = 1,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .pBufferInfo = &buffer_info
+    };
+
+    vkUpdateDescriptorSets(
+        graphics::internal::context.device,
+        1, &write,
+        0, nullptr
+    );
+}
+
+bool ensure_point_lights_capacity(std::size_t count) {
+	const std::size_t required =
+		std::max(count, std::size_t{1});
+
+	auto& scene_resources = resources.scene;
+
+	if (required <= scene_resources.point_lights_capacity) {
+		return true;
+	}
+
+	auto& context = graphics::internal::context;
+
+	VkPhysicalDeviceProperties properties{};
+	vkGetPhysicalDeviceProperties(
+		context.physical_device,
+		&properties
+	);
+
+	const std::size_t max_capacity =
+		properties.limits.maxStorageBufferRange /
+		sizeof(scene::PointLightData);
+
+	if (required > max_capacity) {
+		std::cerr << "Requested point light count exceeds maximum storage buffer range\n";
+		return false;
+	}
+
+	const std::size_t new_capacity = std::min(
+		max_capacity,
+		std::max(
+			required,
+			scene_resources.point_lights_capacity * 2
+		)
+	);
+
+	VkBuffer new_buffer = VK_NULL_HANDLE;
+	VmaAllocation new_allocation = nullptr;
+
+	if (!create_buffer(
+		static_cast<VkDeviceSize>(new_capacity) *
+			sizeof(scene::PointLightData),
+		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+		nullptr,
+		new_buffer,
+		new_allocation
+	)) {
+		return false;
+	}
+
+	const VkBuffer old_buffer =
+		scene_resources.point_lights_buffer;
+
+	const VmaAllocation old_allocation =
+		scene_resources.point_lights_allocation;
+
+	scene_resources.point_lights_buffer = new_buffer;
+	scene_resources.point_lights_allocation = new_allocation;
+	scene_resources.point_lights_capacity = new_capacity;
+
+	update_point_lights_descriptor();
+
+	if (old_buffer != VK_NULL_HANDLE) {
+		vmaDestroyBuffer(
+			context.allocator,
+			old_buffer,
+			old_allocation
+		);
+	}
+
+	return true;
 }
 
 } // namespace
@@ -445,6 +561,21 @@ bool initialize() {
 		return false;
 	}
 
+	const scene::PointLightData empty_point_light{};
+
+	if (!create_buffer(
+		sizeof(empty_point_light),
+		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+		&empty_point_light,
+		resources.scene.point_lights_buffer,
+		resources.scene.point_lights_allocation
+	)) {
+		destroy_resources();
+		return false;
+	}
+
+	resources.scene.point_lights_capacity = 1;
+
 	const scene::ObjectUniformData initial_uniforms{};
 
 	for (std::size_t i = 0; i < resources.objects.size(); ++i) {
@@ -486,9 +617,27 @@ bool initialize() {
 		return false;
 	}
 
+	const VkDescriptorSetLayoutBinding scene_bindings[] = {
+		global_uniform_binding,
+
+		VkDescriptorSetLayoutBinding{
+			.binding = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
+		}
+	};
+
+	const VkDescriptorSetLayoutCreateInfo scene_layout_info{
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+		.bindingCount =
+			static_cast<uint32_t>(std::size(scene_bindings)),
+		.pBindings = scene_bindings
+	};
+
 	if (vkCreateDescriptorSetLayout(
 		context.device,
-		&set_layout_info,
+		&scene_layout_info,
 		nullptr,
 		&resources.scene_set_layout
 	) != VK_SUCCESS) {
@@ -500,16 +649,23 @@ bool initialize() {
 	constexpr uint32_t uniform_set_count =
 		static_cast<uint32_t>(scene::object_count + 1);
 
-	const VkDescriptorPoolSize pool_size{
-		.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-		.descriptorCount = uniform_set_count,
+	const VkDescriptorPoolSize pool_sizes[] = {
+		{
+			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			uniform_set_count
+		},
+		{
+			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			1
+		}
 	};
 
 	const VkDescriptorPoolCreateInfo pool_info{
 		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
 		.maxSets = uniform_set_count,
-		.poolSizeCount = 1,
-		.pPoolSizes = &pool_size,
+		.poolSizeCount =
+			static_cast<uint32_t>(std::size(pool_sizes)),
+		.pPoolSizes = pool_sizes,
 	};
 
 	if (vkCreateDescriptorPool(
@@ -562,6 +718,8 @@ bool initialize() {
 		0,
 		nullptr
 	);
+
+	update_point_lights_descriptor();
 
 	const VkDescriptorSetAllocateInfo allocate_info{
 		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
@@ -645,7 +803,22 @@ void shutdown() {
 
 
 bool update_uniform_buffers(const scene::FrameUniformData& uniforms) {
-    if (!write_uniform_buffer(
+	if (!ensure_point_lights_capacity(uniforms.point_lights.size())) {
+		return false;
+	}
+
+	if (!uniforms.point_lights.empty()) {
+		if (!write_buffer(
+			resources.scene.point_lights_allocation,
+			uniforms.point_lights.data(),
+			uniforms.point_lights.size() *
+				sizeof(scene::PointLightData)
+		)) {
+			return false;
+		}
+	}
+
+    if (!write_buffer(
         resources.scene.uniform_allocation,
         &uniforms.scene,
         sizeof(uniforms.scene)
@@ -654,7 +827,7 @@ bool update_uniform_buffers(const scene::FrameUniformData& uniforms) {
     }
 
     for (std::size_t i = 0; i < resources.objects.size(); ++i) {
-        if (!write_uniform_buffer(
+        if (!write_buffer(
             resources.objects[i].uniform_allocation,
             &uniforms.objects[i],
             sizeof(uniforms.objects[i])
