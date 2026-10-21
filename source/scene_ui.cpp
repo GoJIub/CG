@@ -59,6 +59,68 @@ void draw_lighting_controls(scene::SceneState& state) {
     );
 }
 
+void draw_camera_controls(scene::CameraSettings& camera) {
+	if (!ImGui::CollapsingHeader(
+        "Camera",
+        ImGuiTreeNodeFlags_DefaultOpen
+    )) {
+        return;
+    }
+
+	ImGui::DragFloat3(
+		"Camera position",
+		&camera.position.x,
+		0.05f
+	);
+
+	ImGui::SliderFloat(
+		"Pitch",
+		&camera.rotation_degrees.x,
+		-89.0f,
+		89.0f,
+		"%.1f deg"
+	);
+
+	ImGui::SliderFloat(
+		"Yaw",
+		&camera.rotation_degrees.y,
+		-180.0f,
+		180.0f,
+		"%.1f deg"
+	);
+
+	ImGui::SliderFloat(
+		"Roll",
+		&camera.rotation_degrees.z,
+		-180.0f,
+		180.0f,
+		"%.1f deg"
+	);
+
+	ImGui::Checkbox(
+		"Perspective projection",
+		&camera.use_perspective_projection
+	);
+
+	if (camera.use_perspective_projection) {
+		ImGui::SliderFloat(
+			"Field of view",
+			&camera.field_of_view_degrees,
+			20.0f,
+			120.0f,
+			"%.1f deg"
+		);
+	} else {
+		ImGui::SliderFloat(
+			"Orthographic half height",
+			&camera.orthographic_half_height,
+			0.5f,
+			10.0f,
+			"%.2f"
+		);
+	}
+}
+
 } // namespace
 
 
@@ -97,29 +159,7 @@ void draw_scene_controls(
 			: scene::TrajectoryCenterMode::ObjectPosition;
 	}
 
-	ImGui::Checkbox(
-		"Perspective projection",
-		&state.camera.use_perspective_projection
-	);
-
-	if (state.camera.use_perspective_projection) {
-		ImGui::SliderFloat(
-			"Field of view",
-			&state.camera.field_of_view_degrees,
-			20.0f,
-			120.0f,
-			"%.1f deg"
-		);
-	} else {
-		ImGui::SliderFloat(
-			"Orthographic half height",
-			&state.camera.orthographic_half_height,
-			0.5f,
-			10.0f,
-			"%.2f"
-		);
-	}
-
+	draw_camera_controls(state.camera);
 	draw_lighting_controls(state);
 
 	ImGui::Separator();

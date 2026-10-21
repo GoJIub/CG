@@ -11,8 +11,7 @@ inline constexpr std::size_t object_count = 2;
 
 struct CameraSettings {
 	glm::vec3 position{ 2.7f, 2.0f, 3.2f };
-	glm::vec3 target{ 0.0f, 0.0f, 0.0f };
-	glm::vec3 up{ 0.0f, 1.0f, 0.0f };
+	glm::vec3 rotation_degrees{0.0f};
 
 	float field_of_view_degrees = 45.0f;
 	float near_plane = 0.1f;

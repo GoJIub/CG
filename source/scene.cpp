@@ -9,6 +9,14 @@ namespace scene {
 constexpr float minimum_rotation_axis_length = 0.0001f;
 
 SceneState::SceneState() {
+	const glm::vec3 forward = glm::normalize(-camera.position);
+
+	camera.rotation_degrees.x =
+		glm::degrees(glm::asin(forward.y));
+
+	camera.rotation_degrees.y =
+		glm::degrees(glm::atan(-forward.x, -forward.z));
+
     constexpr float half_spacing = 1.8f;
     objects[0].settings.position.x = -half_spacing;
     objects[1].settings.position.x =  half_spacing;
@@ -48,11 +56,33 @@ SceneUniformData compute_scene_uniforms(
 	const auto& camera = state.camera;
     SceneUniformData uniforms{};
 
-    const glm::mat4 view = glm::lookAt(
-        camera.position,
-        camera.target,
-        camera.up
-    );
+    const glm::vec3 angles =
+	    glm::radians(camera.rotation_degrees);
+
+	glm::mat4 camera_world = glm::translate(
+		glm::mat4(1.0f),
+		camera.position
+	);
+
+	camera_world = glm::rotate(
+		camera_world,
+		angles.y,
+		glm::vec3(0.0f, 1.0f, 0.0f)
+	);
+
+	camera_world = glm::rotate(
+		camera_world,
+		angles.x,
+		glm::vec3(1.0f, 0.0f, 0.0f)
+	);
+
+	camera_world = glm::rotate(
+		camera_world,
+		angles.z,
+		glm::vec3(0.0f, 0.0f, 1.0f)
+	);
+
+	const glm::mat4 view = glm::inverse(camera_world);
 
     glm::mat4 projection{1.0f};
 
