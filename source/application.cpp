@@ -74,6 +74,14 @@ bool update(double time) {
 		);
 	}
 
+	uniforms.spot_lights.resize(scene_state.spot_lights.size());
+
+	for (std::size_t i = 0; i < scene_state.spot_lights.size(); ++i) {
+		uniforms.spot_lights[i] = scene::compute_spot_light_data(
+			scene_state.spot_lights[i]
+		);
+	}
+
 	if (!scene_renderer::update_uniform_buffers(uniforms)) {
 		return false;
 	}

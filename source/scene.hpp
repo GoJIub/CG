@@ -74,6 +74,17 @@ struct PointLightSettings {
     float intensity = 3.0f;
 };
 
+struct SpotLightSettings {
+    glm::vec3 position{2.0f, 2.0f, 2.0f};
+    glm::vec3 direction{-1.0f, -1.0f, -1.0f};
+
+    glm::vec3 color{1.0f};
+    float intensity = 3.0f;
+
+    float inner_angle_degrees = 15.0f;
+    float outer_angle_degrees = 25.0f;
+};
+
 struct SceneState {
     CameraSettings camera;
     std::array<ObjectState, object_count> objects;
@@ -83,6 +94,7 @@ struct SceneState {
 	glm::vec3 ambient_light{0.1f};
 
     std::vector<PointLightSettings> point_lights;
+    std::vector<SpotLightSettings> spot_lights;
 
 	SceneState();
 };
@@ -115,10 +127,18 @@ struct PointLightData {
     glm::vec4 color{0.0f};
 };
 
+struct SpotLightData {
+    glm::vec4 position{0.0f, 0.0f, 0.0f, 1.0f};
+    glm::vec4 color{0.0f};
+    glm::vec4 direction{0.0f, -1.0f, 0.0f, 0.0f};
+    glm::vec4 cone_cosines{0.0f};
+};
+
 struct FrameUniformData {
     SceneUniformData scene;
     std::array<ObjectUniformData, object_count> objects;
     std::vector<PointLightData> point_lights;
+    std::vector<SpotLightData> spot_lights;
 };
 
 static_assert(
@@ -127,6 +147,15 @@ static_assert(
 
 static_assert(
     offsetof(PointLightData, color) == sizeof(glm::vec4)
+);
+
+static_assert(
+    sizeof(SpotLightData) == sizeof(glm::vec4) * 4
+);
+
+static_assert(
+    offsetof(SpotLightData, cone_cosines) ==
+    sizeof(glm::vec4) * 3
 );
 
 static_assert(
@@ -154,6 +183,10 @@ ObjectUniformData compute_object_uniforms(
 
 PointLightData compute_point_light_data(
     const PointLightSettings& light
+);
+
+SpotLightData compute_spot_light_data(
+    const SpotLightSettings& light
 );
 
 } // namespace scene

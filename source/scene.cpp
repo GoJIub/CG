@@ -23,6 +23,7 @@ SceneState::SceneState() {
 	objects[1].animation.trajectory_phase = glm::pi<float>();
 
 	point_lights.emplace_back();
+	spot_lights.emplace_back();
 }
 
 void update_animation_state(
@@ -139,6 +140,9 @@ SceneUniformData compute_scene_uniforms(
 	uniforms.light_counts.x =
 		static_cast<std::uint32_t>(state.point_lights.size());
 
+	uniforms.light_counts.y =
+		static_cast<std::uint32_t>(state.spot_lights.size());
+
     return uniforms;
 }
 
@@ -205,6 +209,45 @@ PointLightData compute_point_light_data(
     data.position = glm::vec4(light.position, 1.0f);
     data.color = glm::vec4(
         light.color * light.intensity,
+        0.0f
+    );
+
+    return data;
+}
+
+SpotLightData compute_spot_light_data(
+    const SpotLightSettings& light
+) {
+    SpotLightData data{};
+
+    glm::vec3 direction = light.direction;
+
+    constexpr float minimum_direction_length = 0.0001f;
+
+    if (glm::length(direction) < minimum_direction_length) {
+        direction = glm::vec3(0.0f, -1.0f, 0.0f);
+    }
+
+    const float inner_angle = glm::clamp(
+        light.inner_angle_degrees,
+        0.0f,
+        89.0f
+    );
+
+    const float outer_angle = glm::clamp(
+        light.outer_angle_degrees,
+        inner_angle,
+        89.0f
+    );
+
+    data.position = glm::vec4(light.position, 1.0f);
+    data.direction = glm::vec4(glm::normalize(direction), 0.0f);
+    data.color = glm::vec4(light.color * light.intensity, 0.0f);
+
+    data.cone_cosines = glm::vec4(
+        glm::cos(glm::radians(inner_angle)),
+        glm::cos(glm::radians(outer_angle)),
+        0.0f,
         0.0f
     );
 

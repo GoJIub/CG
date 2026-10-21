@@ -307,6 +307,109 @@ void draw_point_lights_controls(scene::SceneState& state) {
     ImGui::PopID();
 }
 
+void draw_spot_lights_controls(scene::SceneState& state) {
+    if (!ImGui::CollapsingHeader(
+        "Spot lights",
+        ImGuiTreeNodeFlags_DefaultOpen
+    )) {
+        return;
+    }
+
+    ImGui::PushID("SpotLights");
+
+    auto& lights = state.spot_lights;
+
+    if (ImGui::Button("Add spot light")) {
+        lights.emplace_back();
+    }
+
+    ImGui::Text("Count: %zu", lights.size());
+
+    std::size_t remove_index = lights.size();
+
+    for (std::size_t i = 0; i < lights.size(); ++i) {
+        ImGui::PushID(static_cast<int>(i));
+
+        if (ImGui::TreeNodeEx(
+            "Light",
+            ImGuiTreeNodeFlags_DefaultOpen,
+            "Spot light %zu",
+            i + 1
+        )) {
+            auto& light = lights[i];
+
+            ImGui::DragFloat3(
+				"Position",
+				&light.position.x,
+				0.05f
+			);
+
+			ImGui::SliderFloat3(
+				"Direction",
+				&light.direction.x,
+				-1.0f,
+				1.0f,
+				"%.2f",
+				ImGuiSliderFlags_AlwaysClamp
+			);
+			if (glm::length(light.direction) < 0.0001f) {
+				ImGui::TextDisabled(
+					"Zero direction: using (0, -1, 0)"
+				);
+			}
+
+			ImGui::ColorEdit3(
+				"Color",
+				&light.color.x
+			);
+
+			ImGui::SliderFloat(
+				"Intensity",
+				&light.intensity,
+				0.0f,
+				20.0f,
+				"%.2f",
+				ImGuiSliderFlags_AlwaysClamp
+			);
+
+			ImGui::SliderFloat(
+				"Inner half-angle",
+				&light.inner_angle_degrees,
+				0.0f,
+				light.outer_angle_degrees,
+				"%.1f deg",
+				ImGuiSliderFlags_AlwaysClamp
+			);
+
+			ImGui::SliderFloat(
+				"Outer half-angle",
+				&light.outer_angle_degrees,
+				light.inner_angle_degrees,
+				89.0f,
+				"%.1f deg",
+				ImGuiSliderFlags_AlwaysClamp
+			);
+
+            if (ImGui::Button("Remove")) {
+                remove_index = i;
+            }
+
+            ImGui::TreePop();
+        }
+
+        ImGui::PopID();
+    }
+
+    if (remove_index < lights.size()) {
+        lights.erase(
+            lights.begin() +
+            static_cast<std::ptrdiff_t>(remove_index)
+        );
+    }
+
+    ImGui::PopID();
+}
+
 } // namespace
 
 
@@ -347,6 +450,7 @@ void draw_scene_controls(
 	draw_lighting_controls(state);
 	draw_object_controls(state);
 	draw_point_lights_controls(state);
+	draw_spot_lights_controls(state);
 
 	ImGui::Separator();
 

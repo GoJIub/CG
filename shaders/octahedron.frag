@@ -20,6 +20,17 @@ layout(std430, set = 0, binding = 1) readonly buffer PointLights {
     PointLightData lights[];
 } point_light_buffer;
 
+struct SpotLightData {
+    vec4 position;
+    vec4 color;
+    vec4 direction;
+    vec4 cone_cosines;
+};
+
+layout(std430, set = 0, binding = 2) readonly buffer SpotLights {
+    SpotLightData lights[];
+} spot_light_buffer;
+
 layout(std140, set = 1, binding = 0) uniform ObjectUniformData {
     mat4 model;
     vec4 albedo;
@@ -95,6 +106,59 @@ vec3 evaluate_point_light(
         evaluate_blinn_phong(N, L, V);
 }
 
+vec3 evaluate_spot_light(
+    SpotLightData light,
+    vec3 N,
+    vec3 V
+) {
+    vec3 from_light = in_world_position - light.position.xyz;
+    float distance_squared = dot(from_light, from_light);
+
+    const float minimum_direction_distance_squared = 1e-12;
+
+    if (distance_squared <= minimum_direction_distance_squared) {
+        return vec3(0.0);
+    }
+
+    vec3 Q = from_light / sqrt(distance_squared);
+
+    float cos_angle = clamp(
+        dot(light.direction.xyz, Q),
+        -1.0,
+        1.0
+    );
+
+    float cos_inner = light.cone_cosines.x;
+    float cos_outer = light.cone_cosines.y;
+
+    float cone_factor;
+
+    if (cos_inner > cos_outer) {
+        cone_factor = smoothstep(
+            cos_outer,
+            cos_inner,
+            cos_angle
+        );
+    } else {
+        cone_factor = step(cos_outer, cos_angle);
+    }
+
+    if (cone_factor <= 0.0) {
+        return vec3(0.0);
+    }
+
+    PointLightData point_light = PointLightData(
+        light.position,
+        light.color
+    );
+
+    return cone_factor * evaluate_point_light(
+        point_light,
+        N,
+        V
+    );
+}
+
 void main() {
     vec3 N = normalize(in_normal);
 
@@ -118,6 +182,14 @@ void main() {
     for (uint i = 0u; i < scene_data.light_counts.x; ++i) {
         result += evaluate_point_light(
             point_light_buffer.lights[i],
+            N,
+            V
+        );
+    }
+
+    for (uint i = 0u; i < scene_data.light_counts.y; ++i) {
+        result += evaluate_spot_light(
+            spot_light_buffer.lights[i],
             N,
             V
         );

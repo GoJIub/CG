@@ -15,13 +15,19 @@
 
 namespace {
 
+struct StorageBufferResources {
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VmaAllocation allocation = nullptr;
+    std::size_t capacity = 0;
+};
+
 struct SceneResources {
     VkBuffer uniform_buffer = VK_NULL_HANDLE;
     VmaAllocation uniform_allocation = nullptr;
     VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
-	VkBuffer point_lights_buffer = VK_NULL_HANDLE;
-	VmaAllocation point_lights_allocation = nullptr;
-	std::size_t point_lights_capacity = 0;
+
+    StorageBufferResources point_lights;
+    StorageBufferResources spot_lights;
 };
 
 struct ObjectResources {
@@ -363,16 +369,28 @@ void destroy_resources() {
 		resources.scene.uniform_allocation = nullptr;
 	}
 
-	if (resources.scene.point_lights_buffer != VK_NULL_HANDLE) {
+	if (resources.scene.spot_lights.buffer != VK_NULL_HANDLE) {
 		vmaDestroyBuffer(
 			context.allocator,
-			resources.scene.point_lights_buffer,
-			resources.scene.point_lights_allocation
+			resources.scene.spot_lights.buffer,
+			resources.scene.spot_lights.allocation
 		);
 
-		resources.scene.point_lights_buffer = VK_NULL_HANDLE;
-		resources.scene.point_lights_allocation = nullptr;
-		resources.scene.point_lights_capacity = 0;
+		resources.scene.spot_lights.buffer = VK_NULL_HANDLE;
+		resources.scene.spot_lights.allocation = nullptr;
+		resources.scene.spot_lights.capacity = 0;
+	}
+
+	if (resources.scene.point_lights.buffer != VK_NULL_HANDLE) {
+		vmaDestroyBuffer(
+			context.allocator,
+			resources.scene.point_lights.buffer,
+			resources.scene.point_lights.allocation
+		);
+
+		resources.scene.point_lights.buffer = VK_NULL_HANDLE;
+		resources.scene.point_lights.allocation = nullptr;
+		resources.scene.point_lights.capacity = 0;
 	}
 
 	for (auto& object_resources : resources.objects) {
@@ -409,20 +427,23 @@ void destroy_resources() {
 	}
 }
 
-void update_point_lights_descriptor() {
+void update_storage_buffer_descriptor(
+    const StorageBufferResources& storage,
+    std::size_t element_size,
+    std::uint32_t binding
+) {
     const VkDescriptorBufferInfo buffer_info{
-        .buffer = resources.scene.point_lights_buffer,
+        .buffer = storage.buffer,
         .offset = 0,
         .range =
-            static_cast<VkDeviceSize>(
-                resources.scene.point_lights_capacity
-            ) * sizeof(scene::PointLightData)
+            static_cast<VkDeviceSize>(storage.capacity) *
+            element_size
     };
 
     const VkWriteDescriptorSet write{
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         .dstSet = resources.scene.descriptor_set,
-        .dstBinding = 1,
+        .dstBinding = binding,
         .descriptorCount = 1,
         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
         .pBufferInfo = &buffer_info
@@ -435,76 +456,83 @@ void update_point_lights_descriptor() {
     );
 }
 
-bool ensure_point_lights_capacity(std::size_t count) {
-	const std::size_t required =
-		std::max(count, std::size_t{1});
+bool ensure_storage_buffer_capacity(
+    StorageBufferResources& storage,
+    std::size_t count,
+    std::size_t element_size,
+    std::uint32_t binding
+) {
+    if (element_size == 0) {
+        std::cerr << "Storage buffer element size must be nonzero\n";
+        return false;
+    }
 
-	auto& scene_resources = resources.scene;
+    const std::size_t required =
+        std::max(count, std::size_t{1});
 
-	if (required <= scene_resources.point_lights_capacity) {
-		return true;
-	}
+    if (required <= storage.capacity) {
+        return true;
+    }
 
-	auto& context = graphics::internal::context;
+    auto& context = graphics::internal::context;
 
-	VkPhysicalDeviceProperties properties{};
-	vkGetPhysicalDeviceProperties(
-		context.physical_device,
-		&properties
-	);
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(
+        context.physical_device,
+        &properties
+    );
 
-	const std::size_t max_capacity =
-		properties.limits.maxStorageBufferRange /
-		sizeof(scene::PointLightData);
+    const std::size_t max_capacity =
+        properties.limits.maxStorageBufferRange / element_size;
 
-	if (required > max_capacity) {
-		std::cerr << "Requested point light count exceeds maximum storage buffer range\n";
-		return false;
-	}
+    if (required > max_capacity) {
+        std::cerr << "Requested storage buffer size exceeds limit\n";
+        return false;
+    }
 
-	const std::size_t new_capacity = std::min(
-		max_capacity,
-		std::max(
-			required,
-			scene_resources.point_lights_capacity * 2
-		)
-	);
+    const std::size_t doubled_capacity =
+        storage.capacity > max_capacity / 2
+            ? max_capacity
+            : storage.capacity * 2;
 
-	VkBuffer new_buffer = VK_NULL_HANDLE;
-	VmaAllocation new_allocation = nullptr;
+    const std::size_t new_capacity =
+        std::max(required, doubled_capacity);
 
-	if (!create_buffer(
-		static_cast<VkDeviceSize>(new_capacity) *
-			sizeof(scene::PointLightData),
-		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-		nullptr,
-		new_buffer,
-		new_allocation
-	)) {
-		return false;
-	}
+    VkBuffer new_buffer = VK_NULL_HANDLE;
+    VmaAllocation new_allocation = nullptr;
 
-	const VkBuffer old_buffer =
-		scene_resources.point_lights_buffer;
+    if (!create_buffer(
+        static_cast<VkDeviceSize>(new_capacity) * element_size,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        nullptr,
+        new_buffer,
+        new_allocation
+    )) {
+        return false;
+    }
 
-	const VmaAllocation old_allocation =
-		scene_resources.point_lights_allocation;
+    const VkBuffer old_buffer = storage.buffer;
+    const VmaAllocation old_allocation = storage.allocation;
 
-	scene_resources.point_lights_buffer = new_buffer;
-	scene_resources.point_lights_allocation = new_allocation;
-	scene_resources.point_lights_capacity = new_capacity;
+    storage.buffer = new_buffer;
+    storage.allocation = new_allocation;
+    storage.capacity = new_capacity;
 
-	update_point_lights_descriptor();
+    update_storage_buffer_descriptor(
+        storage,
+        element_size,
+        binding
+    );
 
-	if (old_buffer != VK_NULL_HANDLE) {
-		vmaDestroyBuffer(
-			context.allocator,
-			old_buffer,
-			old_allocation
-		);
-	}
+    if (old_buffer != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(
+            context.allocator,
+            old_buffer,
+            old_allocation
+        );
+    }
 
-	return true;
+    return true;
 }
 
 } // namespace
@@ -567,14 +595,29 @@ bool initialize() {
 		sizeof(empty_point_light),
 		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 		&empty_point_light,
-		resources.scene.point_lights_buffer,
-		resources.scene.point_lights_allocation
+		resources.scene.point_lights.buffer,
+		resources.scene.point_lights.allocation
 	)) {
 		destroy_resources();
 		return false;
 	}
 
-	resources.scene.point_lights_capacity = 1;
+	resources.scene.point_lights.capacity = 1;
+
+	const scene::SpotLightData empty_spot_light{};
+
+	if (!create_buffer(
+		sizeof(empty_spot_light),
+		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+		&empty_spot_light,
+		resources.scene.spot_lights.buffer,
+		resources.scene.spot_lights.allocation
+	)) {
+		destroy_resources();
+		return false;
+	}
+
+	resources.scene.spot_lights.capacity = 1;
 
 	const scene::ObjectUniformData initial_uniforms{};
 
@@ -625,6 +668,13 @@ bool initialize() {
 			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 			.descriptorCount = 1,
 			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
+		},
+
+		VkDescriptorSetLayoutBinding{
+			.binding = 2,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
 		}
 	};
 
@@ -656,7 +706,7 @@ bool initialize() {
 		},
 		{
 			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-			1
+			2
 		}
 	};
 
@@ -719,7 +769,17 @@ bool initialize() {
 		nullptr
 	);
 
-	update_point_lights_descriptor();
+	update_storage_buffer_descriptor(
+		resources.scene.point_lights,
+		sizeof(scene::PointLightData),
+		1
+	);
+
+	update_storage_buffer_descriptor(
+		resources.scene.spot_lights,
+		sizeof(scene::SpotLightData),
+		2
+	);
 
 	const VkDescriptorSetAllocateInfo allocate_info{
 		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
@@ -803,16 +863,41 @@ void shutdown() {
 
 
 bool update_uniform_buffers(const scene::FrameUniformData& uniforms) {
-	if (!ensure_point_lights_capacity(uniforms.point_lights.size())) {
+	if (!ensure_storage_buffer_capacity(
+		resources.scene.point_lights,
+		uniforms.point_lights.size(),
+		sizeof(scene::PointLightData),
+		1
+	)) {
+		return false;
+	}
+
+	if (!ensure_storage_buffer_capacity(
+		resources.scene.spot_lights,
+		uniforms.spot_lights.size(),
+		sizeof(scene::SpotLightData),
+		2
+	)) {
 		return false;
 	}
 
 	if (!uniforms.point_lights.empty()) {
 		if (!write_buffer(
-			resources.scene.point_lights_allocation,
+			resources.scene.point_lights.allocation,
 			uniforms.point_lights.data(),
 			uniforms.point_lights.size() *
 				sizeof(scene::PointLightData)
+		)) {
+			return false;
+		}
+	}
+
+	if (!uniforms.spot_lights.empty()) {
+		if (!write_buffer(
+			resources.scene.spot_lights.allocation,
+			uniforms.spot_lights.data(),
+			uniforms.spot_lights.size() *
+				sizeof(scene::SpotLightData)
 		)) {
 			return false;
 		}
