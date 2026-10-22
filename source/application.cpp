@@ -1,8 +1,8 @@
 #include "application.hpp"
-#include "scene_renderer.hpp"
-#include "scene_ui.hpp"
-#include "scene.hpp"
-#include "camera_controller.hpp"
+#include "graphics/scene_renderer.hpp"
+#include "ui/scene_ui.hpp"
+#include "scene/scene.hpp"
+#include "input/camera_controller.hpp"
 
 namespace {
 

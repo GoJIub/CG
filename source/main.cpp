@@ -9,7 +9,7 @@
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
 
-#include "graphics_internal.hpp"
+#include "graphics/graphics_internal.hpp"
 #include "application.hpp"
 
 namespace {

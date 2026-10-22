@@ -1,7 +1,7 @@
 #pragma once
 
 #include "graphics_internal.hpp"
-#include "scene.hpp"
+#include "scene/scene.hpp"
 
 namespace scene_renderer {
 

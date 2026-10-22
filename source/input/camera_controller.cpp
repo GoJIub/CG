@@ -1,5 +1,5 @@
 #include "camera_controller.hpp"
-#include "scene.hpp"
+#include "scene/scene.hpp"
 
 #include <algorithm>
 

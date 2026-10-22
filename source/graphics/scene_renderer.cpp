@@ -1,7 +1,7 @@
 #include "scene_renderer.hpp"
-#include "octahedron_mesh.hpp"
-#include "sphere_mesh.hpp"
-#include "cone_mesh.hpp"
+#include "geometry/octahedron_mesh.hpp"
+#include "geometry/sphere_mesh.hpp"
+#include "geometry/cone_mesh.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <vulkan/vulkan.h>

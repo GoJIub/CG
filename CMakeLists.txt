@@ -6,15 +6,15 @@ project(vulkan-starter-app LANGUAGES C CXX)
 add_executable(
 	${PROJECT_NAME}
 	source/main.cpp
-	source/graphics_internal.cpp
+	source/graphics/graphics_internal.cpp
 	source/application.cpp
-	source/octahedron_mesh.cpp
-	source/scene_renderer.cpp
-	source/scene_ui.cpp
-	source/scene.cpp
-	source/sphere_mesh.cpp
-	source/cone_mesh.cpp
-	source/camera_controller.cpp
+	source/geometry/octahedron_mesh.cpp
+	source/graphics/scene_renderer.cpp
+	source/ui/scene_ui.cpp
+	source/scene/scene.cpp
+	source/geometry/sphere_mesh.cpp
+	source/geometry/cone_mesh.cpp
+	source/input/camera_controller.cpp
 )
 
 if(LINUX)
@@ -90,6 +90,9 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
+target_include_directories(${PROJECT_NAME} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/source
+)
 target_sources(${PROJECT_NAME} PRIVATE
 	${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
 	${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
