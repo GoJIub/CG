@@ -2,13 +2,16 @@
 #include "scene_renderer.hpp"
 #include "scene_ui.hpp"
 #include "scene.hpp"
+#include "camera_controller.hpp"
 
 namespace {
 
 scene::SceneState scene_state;
 scene::FrameUniformData frame_uniforms{};
+camera_controller::State camera_input_state;
 
-}
+} // namespace
+
 
 namespace application {
 
@@ -24,12 +27,19 @@ bool initialize() {
     return scene_renderer::initialize();
 }
 
-void shutdown() {
+void shutdown(GLFWwindow* window) {
+    camera_controller::release(camera_input_state, window);
     scene_renderer::shutdown();
 }
 
-bool update(double time) {
-	scene_ui::draw_scene_controls(scene_state);
+bool update(double time, GLFWwindow* window) {
+    scene_ui::draw_scene_controls(scene_state);
+
+    camera_controller::update(
+        camera_input_state,
+        window,
+        scene_state.camera
+    );
 
 	auto& context = graphics::internal::context;
 

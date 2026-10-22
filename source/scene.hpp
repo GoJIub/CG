@@ -23,6 +23,10 @@ struct CameraSettings {
 	float orthographic_half_height = 2.2f;
 };
 
+glm::mat4 compute_camera_world_matrix(
+    const CameraSettings& camera
+);
+
 struct MaterialSettings {
     glm::vec3 albedo{1.0f};
     glm::vec3 specular_color{0.5f};

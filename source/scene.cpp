@@ -52,6 +52,38 @@ void update_animation_state(
 	}
 }
 
+glm::mat4 compute_camera_world_matrix(
+    const CameraSettings& camera
+) {
+    const glm::vec3 angles =
+        glm::radians(camera.rotation_degrees);
+
+    glm::mat4 world = glm::translate(
+        glm::mat4(1.0f),
+        camera.position
+    );
+
+    world = glm::rotate(
+        world,
+        angles.y,
+        glm::vec3(0.0f, 1.0f, 0.0f)
+    );
+
+    world = glm::rotate(
+        world,
+        angles.x,
+        glm::vec3(1.0f, 0.0f, 0.0f)
+    );
+
+    world = glm::rotate(
+        world,
+        angles.z,
+        glm::vec3(0.0f, 0.0f, 1.0f)
+    );
+
+    return world;
+}
+
 SceneUniformData compute_scene_uniforms(
     const SceneState& state,
     float aspect_ratio
@@ -59,33 +91,9 @@ SceneUniformData compute_scene_uniforms(
 	const auto& camera = state.camera;
     SceneUniformData uniforms{};
 
-    const glm::vec3 angles =
-	    glm::radians(camera.rotation_degrees);
-
-	glm::mat4 camera_world = glm::translate(
-		glm::mat4(1.0f),
-		camera.position
+    const glm::mat4 view = glm::inverse(
+		compute_camera_world_matrix(camera)
 	);
-
-	camera_world = glm::rotate(
-		camera_world,
-		angles.y,
-		glm::vec3(0.0f, 1.0f, 0.0f)
-	);
-
-	camera_world = glm::rotate(
-		camera_world,
-		angles.x,
-		glm::vec3(1.0f, 0.0f, 0.0f)
-	);
-
-	camera_world = glm::rotate(
-		camera_world,
-		angles.z,
-		glm::vec3(0.0f, 0.0f, 1.0f)
-	);
-
-	const glm::mat4 view = glm::inverse(camera_world);
 
     glm::mat4 projection{1.0f};
 

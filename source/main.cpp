@@ -86,7 +86,7 @@ int main() {
 			break;
 		}
 
-		if (!application::update(glfwGetTime())) {
+		if (!application::update(glfwGetTime(), glfw_window)) {
 			ImGui::EndFrame();
 			status = EXIT_FAILURE;
 			break;
@@ -96,7 +96,7 @@ int main() {
 		graphics::internal::submitAndPresent();
 	}
 
-	application::shutdown();
+	application::shutdown(glfw_window);
 err_application_init:
 	graphics::internal::shutdown();
 err_graphics_init:

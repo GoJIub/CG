@@ -13,7 +13,8 @@ add_executable(
 	source/scene_ui.cpp
 	source/scene.cpp
 	source/sphere_mesh.cpp
-	"source/cone_mesh.cpp"
+	source/cone_mesh.cpp
+	source/camera_controller.cpp
 )
 
 if(LINUX)
