@@ -1,20 +1,18 @@
 #include "scene_renderer.hpp"
-#include "geometry/octahedron_mesh.hpp"
-#include "geometry/sphere_mesh.hpp"
-#include "geometry/cone_mesh.hpp"
+#include "gpu_buffer.hpp"
+#include "light_gizmos.hpp"
+#include "pipeline_utils.hpp"
 
-#include <glm/gtc/matrix_transform.hpp>
+#include "geometry/octahedron_mesh.hpp"
+
 #include <vulkan/vulkan.h>
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
-#include <fstream>
 #include <iterator>
 #include <iostream>
-#include <vector>
 
 namespace {
 
@@ -39,36 +37,6 @@ struct ObjectResources {
     VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
 };
 
-struct MeshResources {
-    VkBuffer vertex_buffer = VK_NULL_HANDLE;
-    VmaAllocation vertex_allocation = nullptr;
-
-    VkBuffer index_buffer = VK_NULL_HANDLE;
-    VmaAllocation index_allocation = nullptr;
-};
-
-struct VertexBufferResources {
-    VkBuffer buffer = VK_NULL_HANDLE;
-    VmaAllocation allocation = nullptr;
-};
-
-struct MarkerPushConstants {
-    glm::mat4 model{1.0f};
-    glm::vec4 color{1.0f};
-};
-
-static_assert(offsetof(MarkerPushConstants, color) == 64);
-static_assert(sizeof(MarkerPushConstants) == 80);
-
-struct MarkerPipelineResources {
-    VkShaderModule vertex_shader = VK_NULL_HANDLE;
-    VkShaderModule fragment_shader = VK_NULL_HANDLE;
-
-    VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
-    VkPipeline pipeline = VK_NULL_HANDLE;
-    VkPipeline cone_pipeline = VK_NULL_HANDLE;
-};
-
 struct Resources {
 	VkShaderModule vertex_shader = VK_NULL_HANDLE;
 	VkShaderModule fragment_shader = VK_NULL_HANDLE;
@@ -91,285 +59,20 @@ struct Resources {
 
 	SceneResources scene{};
 
-	MeshResources sphere_mesh;
-	VertexBufferResources cone_vertices;
-	MarkerPipelineResources markers;
+	light_gizmos::Resources gizmos;
 };
 
 Resources resources;
 
-bool create_buffer(
-    VkDeviceSize size,
-    VkBufferUsageFlags usage,
-    const void* source_data,
-    VkBuffer& out_buffer,
-    VmaAllocation& out_allocation
-) {
-	VkBufferCreateInfo buffer_info{
-		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-		.size = size,
-		.usage = usage,
-		.sharingMode = VK_SHARING_MODE_EXCLUSIVE
-	};
-
-	VmaAllocationCreateInfo alloc_info{
-		.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-				 VMA_ALLOCATION_CREATE_MAPPED_BIT,
-		.usage = VMA_MEMORY_USAGE_AUTO
-	};
-
-	VmaAllocationInfo allocation_info{};
-	VkResult result = vmaCreateBuffer(
-		graphics::internal::context.allocator,
-		&buffer_info,
-		&alloc_info,
-		&out_buffer,
-		&out_allocation,
-		&allocation_info
-	);
-
-	if (result != VK_SUCCESS) {
-		std::cerr << "Failed to create buffer\n";
-		return false;
-	}
-
-	if (source_data != nullptr) {
-		std::memcpy(allocation_info.pMappedData, source_data, static_cast<size_t>(size));
-
-		vmaFlushAllocation(
-			graphics::internal::context.allocator,
-			out_allocation,
-			0,
-			size
-		);
-	}
-
-	return true;
-}
-
-bool write_buffer(
-    VmaAllocation allocation,
-    const void* source,
-    std::size_t size
-) {
-    auto& context = graphics::internal::context;
-
-    void* mapped_data = nullptr;
-
-    if (vmaMapMemory(
-        context.allocator,
-        allocation,
-        &mapped_data
-    ) != VK_SUCCESS) {
-        std::cerr << "Failed to map buffer\n";
-        return false;
-    }
-
-    std::memcpy(mapped_data, source, size);
-
-    const VkResult result = vmaFlushAllocation(
-        context.allocator,
-        allocation,
-        0,
-        static_cast<VkDeviceSize>(size)
-    );
-
-    vmaUnmapMemory(context.allocator, allocation);
-
-    if (result != VK_SUCCESS) {
-        std::cerr << "Failed to flush buffer\n";
-        return false;
-    }
-
-    return true;
-}
-
-bool create_graphics_pipeline(
-    VkShaderModule vertex_shader,
-    VkShaderModule fragment_shader,
-    const VkPipelineVertexInputStateCreateInfo& vertex_input_info,
-    VkPipelineLayout pipeline_layout,
-    VkPipeline& out_pipeline,
-    VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
-) {
-	auto& context = graphics::internal::context;
-
-	std::array<VkPipelineShaderStageCreateInfo, 2> shader_stages{
-		VkPipelineShaderStageCreateInfo{
-			.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-			.stage = VK_SHADER_STAGE_VERTEX_BIT,
-			.module = vertex_shader,
-			.pName = "main"
-		},
-		VkPipelineShaderStageCreateInfo{
-			.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-			.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-			.module = fragment_shader,
-			.pName = "main"
-		}
-	};
-
-	VkPipelineInputAssemblyStateCreateInfo input_assembly_info{
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-		.topology = topology,
-		.primitiveRestartEnable = VK_FALSE
-	};
-
-	const VkDynamicState dynamic_states[] = {
-		VK_DYNAMIC_STATE_VIEWPORT,
-		VK_DYNAMIC_STATE_SCISSOR,
-	};
-
-	VkPipelineViewportStateCreateInfo viewport_state_info{
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-		.viewportCount = 1,
-		.scissorCount = 1
-	};
-
-	VkPipelineDynamicStateCreateInfo dynamic_state_info{
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-		.dynamicStateCount = static_cast<uint32_t>(std::size(dynamic_states)),
-		.pDynamicStates = dynamic_states
-	};
-
-	VkPipelineRasterizationStateCreateInfo rasterization_info{
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-		.polygonMode = VK_POLYGON_MODE_FILL,
-		.cullMode = VK_CULL_MODE_BACK_BIT,
-		.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
-		.lineWidth = 1.0f
-	};
-
-	VkPipelineMultisampleStateCreateInfo multisample_info{
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-		.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT
-	};
-
-	VkPipelineDepthStencilStateCreateInfo depth_stencil_info{
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-		.depthTestEnable = VK_TRUE,
-		.depthWriteEnable = VK_TRUE,
-		.depthCompareOp = VK_COMPARE_OP_LESS
-	};
-
-	VkPipelineColorBlendAttachmentState color_blend_attachment{
-		.colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
-						  VK_COLOR_COMPONENT_G_BIT |
-						  VK_COLOR_COMPONENT_B_BIT |
-						  VK_COLOR_COMPONENT_A_BIT
-	};
-
-	VkPipelineColorBlendStateCreateInfo color_blend_info{
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-		.attachmentCount = 1,
-		.pAttachments = &color_blend_attachment
-	};
-
-	VkGraphicsPipelineCreateInfo pipeline_info{
-		.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-		.stageCount = static_cast<uint32_t>(shader_stages.size()),
-		.pStages = shader_stages.data(),
-		.pVertexInputState = &vertex_input_info,
-		.pInputAssemblyState = &input_assembly_info,
-		.pViewportState = &viewport_state_info,
-		.pRasterizationState = &rasterization_info,
-		.pMultisampleState = &multisample_info,
-		.pDepthStencilState = &depth_stencil_info,
-		.pColorBlendState = &color_blend_info,
-		.pDynamicState = &dynamic_state_info,
-		.layout = pipeline_layout,
-		.renderPass = context.render_pass,
-		.subpass = 0
-	};
-
-	if (vkCreateGraphicsPipelines(
-		context.device,
-		VK_NULL_HANDLE,
-		1,
-		&pipeline_info,
-		nullptr,
-		&out_pipeline
-	) != VK_SUCCESS) {
-		std::cerr << "Failed to create graphics pipeline\n";
-		return false;
-	}
-
-	return true;
-}
-
-VkShaderModule loadShaderModule(const char path[]) {
-	std::ifstream file(path, std::ios::binary | std::ios::ate);
-	if (!file) {
-		std::cerr << "Failed to open shader file: " << path << '\n';
-		return VK_NULL_HANDLE;
-	}
-	const size_t size = file.tellg();
-
-	if (size == 0) {
-		std::cerr << "Failed to read shader file: " << path << std::endl;
-		return VK_NULL_HANDLE;
-	}
-	if (size % sizeof(uint32_t) != 0) {
-		std::cerr << "Shader file size is not a multiple of 4: " << path << std::endl;
-		return VK_NULL_HANDLE;
-	}
-
-	std::vector<uint32_t> buffer(size / sizeof(uint32_t));
-
-	file.seekg(0);
-	file.read(
-		reinterpret_cast<char*>(buffer.data()),
-		static_cast<std::streamsize>(size)
-	);
-	if (!file) {
-		std::cerr << "Failed to read shader file: " << path << std::endl;
-		return VK_NULL_HANDLE;
-	}
-	file.close();
-
-	VkShaderModuleCreateInfo info{
-		.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-		.codeSize = size,
-		.pCode = buffer.data(),
-	};
-
-	VkShaderModule result;
-	if (vkCreateShaderModule(graphics::internal::context.device,
-							 &info, nullptr, &result) != VK_SUCCESS) {
-		return VK_NULL_HANDLE;
-	}
-
-	return result;
-}
 
 void destroy_resources() {
 	auto& context = graphics::internal::context;
 
-	if (resources.markers.cone_pipeline != VK_NULL_HANDLE) {
-		vkDestroyPipeline(
-			context.device,
-			resources.markers.cone_pipeline,
-			nullptr
-		);
-		resources.markers.cone_pipeline = VK_NULL_HANDLE;
-	}
-
-	if (resources.markers.pipeline != VK_NULL_HANDLE) {
-		vkDestroyPipeline(
-			context.device,
-			resources.markers.pipeline,
-			nullptr
-		);
-		resources.markers.pipeline = VK_NULL_HANDLE;
-	}
-	if (resources.markers.pipeline_layout != VK_NULL_HANDLE) {
-		vkDestroyPipelineLayout(
-			context.device,
-			resources.markers.pipeline_layout,
-			nullptr
-		);
-		resources.markers.pipeline_layout = VK_NULL_HANDLE;
-	}
+	light_gizmos::destroy(
+		resources.gizmos,
+		context.device,
+		context.allocator
+	);
 
 	if (resources.pipeline != VK_NULL_HANDLE) {
 		vkDestroyPipeline(
@@ -467,38 +170,6 @@ void destroy_resources() {
 		}
 	}
 
-	if (resources.cone_vertices.buffer != VK_NULL_HANDLE) {
-		vmaDestroyBuffer(
-			context.allocator,
-			resources.cone_vertices.buffer,
-			resources.cone_vertices.allocation
-		);
-		resources.cone_vertices.buffer = VK_NULL_HANDLE;
-		resources.cone_vertices.allocation = nullptr;
-	}
-
-	if (resources.sphere_mesh.vertex_buffer != VK_NULL_HANDLE) {
-		vmaDestroyBuffer(
-			context.allocator,
-			resources.sphere_mesh.vertex_buffer,
-			resources.sphere_mesh.vertex_allocation
-		);
-
-		resources.sphere_mesh.vertex_buffer = VK_NULL_HANDLE;
-		resources.sphere_mesh.vertex_allocation = nullptr;
-	}
-
-	if (resources.sphere_mesh.index_buffer != VK_NULL_HANDLE) {
-		vmaDestroyBuffer(
-			context.allocator,
-			resources.sphere_mesh.index_buffer,
-			resources.sphere_mesh.index_allocation
-		);
-
-		resources.sphere_mesh.index_buffer = VK_NULL_HANDLE;
-		resources.sphere_mesh.index_allocation = nullptr;
-	}
-
 	if (resources.vertex_buffer != VK_NULL_HANDLE) {
 		vmaDestroyBuffer(
 			context.allocator,
@@ -516,24 +187,6 @@ void destroy_resources() {
 		);
 		resources.index_buffer = VK_NULL_HANDLE;
 		resources.index_buffer_allocation = nullptr;
-	}
-
-	if (resources.markers.vertex_shader != VK_NULL_HANDLE) {
-		vkDestroyShaderModule(
-			context.device,
-			resources.markers.vertex_shader,
-			nullptr
-		);
-		resources.markers.vertex_shader = VK_NULL_HANDLE;
-	}
-
-	if (resources.markers.fragment_shader != VK_NULL_HANDLE) {
-		vkDestroyShaderModule(
-			context.device,
-			resources.markers.fragment_shader,
-			nullptr
-		);
-		resources.markers.fragment_shader = VK_NULL_HANDLE;
 	}
 
 	if (resources.vertex_shader != VK_NULL_HANDLE) {
@@ -629,7 +282,8 @@ bool ensure_storage_buffer_capacity(
     VkBuffer new_buffer = VK_NULL_HANDLE;
     VmaAllocation new_allocation = nullptr;
 
-    if (!create_buffer(
+    if (!gpu_buffer::create_buffer(
+		context.allocator,
         static_cast<VkDeviceSize>(new_capacity) * element_size,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
         nullptr,
@@ -663,144 +317,6 @@ bool ensure_storage_buffer_capacity(
     return true;
 }
 
-void render_light_markers(
-    VkCommandBuffer command_buffer,
-    const std::vector<scene::LightMarkerData>& markers
-) {
-    if (markers.empty()) {
-        return;
-    }
-
-    vkCmdBindPipeline(
-        command_buffer,
-        VK_PIPELINE_BIND_POINT_GRAPHICS,
-        resources.markers.pipeline
-    );
-
-    const VkDeviceSize vertex_offset = 0;
-
-    vkCmdBindVertexBuffers(
-        command_buffer,
-        0,
-        1,
-        &resources.sphere_mesh.vertex_buffer,
-        &vertex_offset
-    );
-
-    vkCmdBindIndexBuffer(
-        command_buffer,
-        resources.sphere_mesh.index_buffer,
-        0,
-        VK_INDEX_TYPE_UINT32
-    );
-
-    vkCmdBindDescriptorSets(
-        command_buffer,
-        VK_PIPELINE_BIND_POINT_GRAPHICS,
-        resources.markers.pipeline_layout,
-        0,
-        1,
-        &resources.scene.descriptor_set,
-        0,
-        nullptr
-    );
-
-    constexpr float marker_radius = 0.08f;
-
-    for (const auto& marker : markers) {
-        MarkerPushConstants constants{};
-
-        constants.model = glm::translate(
-            glm::mat4(1.0f),
-            marker.position
-        );
-
-        constants.model = glm::scale(
-            constants.model,
-            glm::vec3(marker_radius)
-        );
-
-        constants.color = glm::vec4(marker.color, 1.0f);
-
-        vkCmdPushConstants(
-            command_buffer,
-            resources.markers.pipeline_layout,
-            VK_SHADER_STAGE_VERTEX_BIT,
-            0,
-            sizeof(constants),
-            &constants
-        );
-
-        vkCmdDrawIndexed(
-            command_buffer,
-            static_cast<std::uint32_t>(sphere::indices.size()),
-            1,
-            0,
-            0,
-            0
-        );
-    }
-}
-
-void render_spot_light_cones(
-    VkCommandBuffer command_buffer,
-    const std::vector<glm::mat4>& models
-) {
-    if (models.empty()) {
-        return;
-    }
-
-    vkCmdBindPipeline(
-        command_buffer,
-        VK_PIPELINE_BIND_POINT_GRAPHICS,
-        resources.markers.cone_pipeline
-    );
-
-    const VkDeviceSize vertex_offset = 0;
-
-    vkCmdBindVertexBuffers(
-        command_buffer,
-        0,
-        1,
-        &resources.cone_vertices.buffer,
-        &vertex_offset
-    );
-
-    vkCmdBindDescriptorSets(
-        command_buffer,
-        VK_PIPELINE_BIND_POINT_GRAPHICS,
-        resources.markers.pipeline_layout,
-        0,
-        1,
-        &resources.scene.descriptor_set,
-        0,
-        nullptr
-    );
-
-    for (const auto& model : models) {
-        MarkerPushConstants constants{};
-        constants.model = model;
-        constants.color = glm::vec4(1.0f);
-
-        vkCmdPushConstants(
-            command_buffer,
-            resources.markers.pipeline_layout,
-            VK_SHADER_STAGE_VERTEX_BIT,
-            0,
-            sizeof(constants),
-            &constants
-        );
-
-        vkCmdDraw(
-            command_buffer,
-            static_cast<std::uint32_t>(cone::vertices.size()),
-            1,
-            0,
-            0
-        );
-    }
-}
-
 } // namespace
 
 
@@ -809,34 +325,19 @@ namespace scene_renderer {
 bool initialize() {
 	auto& context = graphics::internal::context;
 
-	resources.vertex_shader = loadShaderModule("shaders/octahedron.vert.spv");
+	resources.vertex_shader = pipeline_utils::load_shader_module(context.device, "shaders/octahedron.vert.spv");
 	if (resources.vertex_shader == VK_NULL_HANDLE) {
 		return false;
 	}
 
-	resources.fragment_shader = loadShaderModule("shaders/octahedron.frag.spv");
+	resources.fragment_shader = pipeline_utils::load_shader_module(context.device, "shaders/octahedron.frag.spv");
 	if (resources.fragment_shader == VK_NULL_HANDLE) {
 		destroy_resources();
 		return false;
 	}
 
-	resources.markers.vertex_shader =
-		loadShaderModule("shaders/light_marker.vert.spv");
-
-	if (resources.markers.vertex_shader == VK_NULL_HANDLE) {
-		destroy_resources();
-		return false;
-	}
-
-	resources.markers.fragment_shader =
-		loadShaderModule("shaders/light_marker.frag.spv");
-
-	if (resources.markers.fragment_shader == VK_NULL_HANDLE) {
-		destroy_resources();
-		return false;
-	}
-
-	if (!create_buffer(
+	if (!gpu_buffer::create_buffer(
+		context.allocator,
 		sizeof(octahedron::vertices),
 		VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
 		octahedron::vertices.data(),
@@ -847,7 +348,8 @@ bool initialize() {
 		return false;
 	}
 
-	if (!create_buffer(
+	if (!gpu_buffer::create_buffer(
+		context.allocator,
 		sizeof(octahedron::indices),
 		VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
 		octahedron::indices.data(),
@@ -858,42 +360,10 @@ bool initialize() {
 		return false;
 	}
 
-	if (!create_buffer(
-		sizeof(sphere::vertices),
-		VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-		sphere::vertices.data(),
-		resources.sphere_mesh.vertex_buffer,
-		resources.sphere_mesh.vertex_allocation
-	)) {
-		destroy_resources();
-		return false;
-	}
-
-	if (!create_buffer(
-		sizeof(sphere::indices),
-		VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-		sphere::indices.data(),
-		resources.sphere_mesh.index_buffer,
-		resources.sphere_mesh.index_allocation
-	)) {
-		destroy_resources();
-		return false;
-	}
-
-	if (!create_buffer(
-		sizeof(cone::vertices),
-		VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-		cone::vertices.data(),
-		resources.cone_vertices.buffer,
-		resources.cone_vertices.allocation
-	)) {
-		destroy_resources();
-		return false;
-	}
-
 	const scene::SceneUniformData initial_scene_uniforms{};
 
-	if (!create_buffer(
+	if (!gpu_buffer::create_buffer(
+		context.allocator,
 		sizeof(initial_scene_uniforms),
 		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
 		&initial_scene_uniforms,
@@ -906,7 +376,8 @@ bool initialize() {
 
 	const scene::PointLightData empty_point_light{};
 
-	if (!create_buffer(
+	if (!gpu_buffer::create_buffer(
+		context.allocator,
 		sizeof(empty_point_light),
 		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 		&empty_point_light,
@@ -921,7 +392,8 @@ bool initialize() {
 
 	const scene::SpotLightData empty_spot_light{};
 
-	if (!create_buffer(
+	if (!gpu_buffer::create_buffer(
+		context.allocator,
 		sizeof(empty_spot_light),
 		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 		&empty_spot_light,
@@ -937,7 +409,8 @@ bool initialize() {
 	const scene::ObjectUniformData initial_uniforms{};
 
 	for (std::size_t i = 0; i < resources.objects.size(); ++i) {
-		if (!create_buffer(
+		if (!gpu_buffer::create_buffer(
+			context.allocator,
 			sizeof(initial_uniforms),
 			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
 			&initial_uniforms,
@@ -1161,31 +634,6 @@ bool initialize() {
 		return false;
 	}
 
-	const VkPushConstantRange marker_push_constant_range{
-		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-		.offset = 0,
-		.size = sizeof(MarkerPushConstants)
-	};
-
-	const VkPipelineLayoutCreateInfo marker_layout_info{
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-		.setLayoutCount = 1,
-		.pSetLayouts = &resources.scene_set_layout,
-		.pushConstantRangeCount = 1,
-		.pPushConstantRanges = &marker_push_constant_range
-	};
-
-	if (vkCreatePipelineLayout(
-		context.device,
-		&marker_layout_info,
-		nullptr,
-		&resources.markers.pipeline_layout
-	) != VK_SUCCESS) {
-		std::cerr << "Failed to create marker pipeline layout\n";
-		destroy_resources();
-		return false;
-	}
-
 	VkPipelineVertexInputStateCreateInfo vertex_input_info{
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 		.vertexBindingDescriptionCount = 1,
@@ -1199,32 +647,9 @@ bool initialize() {
 			octahedron::vertex_attribute_descriptions.data()
 	};
 
-	const VkPipelineVertexInputStateCreateInfo marker_vertex_input_info{
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-		.vertexBindingDescriptionCount = 1,
-		.pVertexBindingDescriptions =
-			&sphere::vertex_binding_description,
-		.vertexAttributeDescriptionCount =
-			static_cast<std::uint32_t>(
-				sphere::vertex_attribute_descriptions.size()
-			),
-		.pVertexAttributeDescriptions =
-			sphere::vertex_attribute_descriptions.data()
-	};
-
-	const VkPipelineVertexInputStateCreateInfo cone_vertex_input_info{
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-		.vertexBindingDescriptionCount = 1,
-		.pVertexBindingDescriptions = &cone::vertex_binding_description,
-		.vertexAttributeDescriptionCount =
-			static_cast<std::uint32_t>(
-				cone::vertex_attribute_descriptions.size()
-			),
-		.pVertexAttributeDescriptions =
-			cone::vertex_attribute_descriptions.data()
-	};
-
-	if (!create_graphics_pipeline(
+	if (!pipeline_utils::create_graphics_pipeline(
+		context.device,
+		context.render_pass,
 		resources.vertex_shader,
 		resources.fragment_shader,
 		vertex_input_info,
@@ -1235,24 +660,12 @@ bool initialize() {
 		return false;
 	}
 
-	if (!create_graphics_pipeline(
-		resources.markers.vertex_shader,
-		resources.markers.fragment_shader,
-		marker_vertex_input_info,
-		resources.markers.pipeline_layout,
-		resources.markers.pipeline
-	)) {
-		destroy_resources();
-		return false;
-	}
-
-	if (!create_graphics_pipeline(
-		resources.markers.vertex_shader,
-		resources.markers.fragment_shader,
-		cone_vertex_input_info,
-		resources.markers.pipeline_layout,
-		resources.markers.cone_pipeline,
-		VK_PRIMITIVE_TOPOLOGY_LINE_LIST
+	if (!light_gizmos::initialize(
+		resources.gizmos,
+		context.device,
+		context.allocator,
+		context.render_pass,
+		resources.scene_set_layout
 	)) {
 		destroy_resources();
 		return false;
@@ -1289,7 +702,8 @@ bool update_uniform_buffers(const scene::FrameUniformData& uniforms) {
 	}
 
 	if (!uniforms.point_lights.empty()) {
-		if (!write_buffer(
+		if (!gpu_buffer::write_buffer(
+			graphics::internal::context.allocator,
 			resources.scene.point_lights.allocation,
 			uniforms.point_lights.data(),
 			uniforms.point_lights.size() *
@@ -1300,7 +714,8 @@ bool update_uniform_buffers(const scene::FrameUniformData& uniforms) {
 	}
 
 	if (!uniforms.spot_lights.empty()) {
-		if (!write_buffer(
+		if (!gpu_buffer::write_buffer(
+			graphics::internal::context.allocator,
 			resources.scene.spot_lights.allocation,
 			uniforms.spot_lights.data(),
 			uniforms.spot_lights.size() *
@@ -1310,7 +725,8 @@ bool update_uniform_buffers(const scene::FrameUniformData& uniforms) {
 		}
 	}
 
-    if (!write_buffer(
+    if (!gpu_buffer::write_buffer(
+		graphics::internal::context.allocator,
         resources.scene.uniform_allocation,
         &uniforms.scene,
         sizeof(uniforms.scene)
@@ -1319,7 +735,8 @@ bool update_uniform_buffers(const scene::FrameUniformData& uniforms) {
     }
 
     for (std::size_t i = 0; i < resources.objects.size(); ++i) {
-        if (!write_buffer(
+        if (!gpu_buffer::write_buffer(
+			graphics::internal::context.allocator,
             resources.objects[i].uniform_allocation,
             &uniforms.objects[i],
             sizeof(uniforms.objects[i])
@@ -1431,13 +848,17 @@ void render(
 		);
 	}
 
-	render_light_markers(
+	light_gizmos::render_light_markers(
+		resources.gizmos,
 		command_buffer,
+		resources.scene.descriptor_set,
 		uniforms.light_markers
 	);
 
-	render_spot_light_cones(
+	light_gizmos::render_spot_light_cones(
+		resources.gizmos,
 		command_buffer,
+		resources.scene.descriptor_set,
 		uniforms.spot_light_cone_models
 	);
 

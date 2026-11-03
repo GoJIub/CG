@@ -1,20 +1,23 @@
 cmake_minimum_required(VERSION 3.20)
 include(FetchContent)
 
-project(vulkan-starter-app LANGUAGES C CXX)
+project(CG LANGUAGES C CXX)
 
 add_executable(
 	${PROJECT_NAME}
 	source/main.cpp
-	source/graphics/graphics_internal.cpp
 	source/application.cpp
-	source/geometry/octahedron_mesh.cpp
-	source/graphics/scene_renderer.cpp
-	source/ui/scene_ui.cpp
-	source/scene/scene.cpp
-	source/geometry/sphere_mesh.cpp
 	source/geometry/cone_mesh.cpp
+	source/geometry/octahedron_mesh.cpp
+	source/geometry/sphere_mesh.cpp
+	source/graphics/gpu_buffer.cpp
+	source/graphics/graphics_internal.cpp
+	source/graphics/light_gizmos.cpp
+	source/graphics/pipeline_utils.cpp
+	source/graphics/scene_renderer.cpp
 	source/input/camera_controller.cpp
+	source/scene/scene.cpp
+	source/ui/scene_ui.cpp
 )
 
 if(LINUX)
