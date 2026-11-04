@@ -11,7 +11,9 @@ add_executable(
 	source/geometry/octahedron_mesh.cpp
 	source/geometry/sphere_mesh.cpp
 	source/graphics/gpu_buffer.cpp
+	source/graphics/gpu_texture.cpp
 	source/graphics/graphics_internal.cpp
+	source/graphics/image_loader.cpp
 	source/graphics/light_gizmos.cpp
 	source/graphics/pipeline_utils.cpp
 	source/graphics/scene_renderer.cpp
@@ -69,6 +71,12 @@ FetchContent_Declare(
     GIT_TAG 1.0.3
 )
 
+FetchContent_Declare(
+    stb
+    GIT_REPOSITORY https://github.com/nothings/stb.git
+    GIT_TAG d14d46f6b44456eb88beac58cba833a4135d4c89
+)
+
 find_package(Vulkan REQUIRED)
 
 set(GLFW_LIBRARY_TYPE STATIC)
@@ -82,6 +90,7 @@ FetchContent_MakeAvailable(
 	VulkanMemoryAllocator
 	imgui
 	glm
+	stb
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
@@ -95,6 +104,9 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 target_include_directories(${PROJECT_NAME} PRIVATE ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/source
+)
+target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE
+    ${stb_SOURCE_DIR}
 )
 target_sources(${PROJECT_NAME} PRIVATE
 	${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
