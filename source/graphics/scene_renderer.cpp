@@ -13,8 +13,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <iterator>
 #include <iostream>
+#include <vector>
 
 namespace {
 
@@ -34,9 +36,15 @@ struct SceneResources {
 };
 
 struct ObjectResources {
-    VkBuffer uniform_buffer = VK_NULL_HANDLE;
-    VmaAllocation uniform_allocation = nullptr;
     VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
+};
+
+struct ObjectUniformResources {
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VmaAllocation allocation = nullptr;
+    VkDeviceSize stride = 0;
+
+    std::vector<std::byte> upload_data;
 };
 
 struct Resources {
@@ -58,6 +66,7 @@ struct Resources {
 	VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
 
 	std::array<ObjectResources, scene::object_count> objects{};
+	ObjectUniformResources object_uniforms;
 
 	SceneResources scene{};
 
@@ -233,17 +242,15 @@ void destroy_resources() {
 		resources.scene.point_lights.capacity = 0;
 	}
 
-	for (auto& object_resources : resources.objects) {
-		if (object_resources.uniform_buffer != VK_NULL_HANDLE) {
-			vmaDestroyBuffer(
-				context.allocator,
-				object_resources.uniform_buffer,
-				object_resources.uniform_allocation
-			);
-			object_resources.uniform_buffer = VK_NULL_HANDLE;
-			object_resources.uniform_allocation = nullptr;
-		}
-	}
+    if (resources.object_uniforms.buffer != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(
+            context.allocator,
+            resources.object_uniforms.buffer,
+            resources.object_uniforms.allocation
+        );
+
+        resources.object_uniforms = {};
+    }
 
 	if (resources.vertex_buffer != VK_NULL_HANDLE) {
 		vmaDestroyBuffer(
@@ -508,21 +515,39 @@ bool initialize() {
 
 	resources.scene.spot_lights.capacity = 1;
 
-	const scene::ObjectUniformData initial_uniforms{};
+	VkPhysicalDeviceProperties device_properties{};
+    vkGetPhysicalDeviceProperties(
+        context.physical_device,
+        &device_properties
+    );
 
-	for (std::size_t i = 0; i < resources.objects.size(); ++i) {
-		if (!gpu_buffer::create_buffer(
-			context.allocator,
-			sizeof(initial_uniforms),
-			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-			&initial_uniforms,
-			resources.objects[i].uniform_buffer,
-			resources.objects[i].uniform_allocation
-		)) {
-			destroy_resources();
-			return false;
-		}
-	}
+    const VkDeviceSize alignment =
+        device_properties.limits.minUniformBufferOffsetAlignment;
+
+    const VkDeviceSize object_size =
+        sizeof(scene::ObjectUniformData);
+
+    resources.object_uniforms.stride =
+        ((object_size + alignment - 1) / alignment) * alignment;
+
+    const VkDeviceSize buffer_size =
+        resources.object_uniforms.stride * scene::object_count;
+
+    if (!gpu_buffer::create_buffer(
+        context.allocator,
+        buffer_size,
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        nullptr,
+        resources.object_uniforms.buffer,
+        resources.object_uniforms.allocation
+    )) {
+        destroy_resources();
+        return false;
+    }
+
+    resources.object_uniforms.upload_data.resize(
+        static_cast<std::size_t>(buffer_size)
+    );
 
 	const VkDescriptorSetLayoutBinding global_uniform_binding{
 		.binding = 0,
@@ -533,8 +558,17 @@ bool initialize() {
 			VK_SHADER_STAGE_FRAGMENT_BIT
 	};
 
+    const VkDescriptorSetLayoutBinding object_uniform_binding{
+        .binding = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+        .descriptorCount = 1,
+        .stageFlags =
+            VK_SHADER_STAGE_VERTEX_BIT |
+            VK_SHADER_STAGE_FRAGMENT_BIT
+    };
+
     const VkDescriptorSetLayoutBinding object_bindings[] = {
-        global_uniform_binding,
+        object_uniform_binding,
 
         VkDescriptorSetLayoutBinding{
             .binding = 1,
@@ -621,7 +655,11 @@ bool initialize() {
     const VkDescriptorPoolSize pool_sizes[] = {
         {
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            uniform_set_count
+            1
+        },
+        {
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+            static_cast<uint32_t>(scene::object_count)
         },
         {
             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -723,7 +761,7 @@ bool initialize() {
 		}
 
         const VkDescriptorBufferInfo uniform_buffer_info{
-            .buffer = object_resources.uniform_buffer,
+            .buffer = resources.object_uniforms.buffer,
             .offset = 0,
             .range = sizeof(scene::ObjectUniformData)
         };
@@ -755,7 +793,7 @@ bool initialize() {
                 .dstSet = object_resources.descriptor_set,
                 .dstBinding = 0,
                 .descriptorCount = 1,
-				.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+				.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
                 .pBufferInfo = &uniform_buffer_info
             },
             {
@@ -927,15 +965,27 @@ bool update_uniform_buffers(const scene::FrameUniformData& uniforms) {
         return false;
     }
 
-    for (std::size_t i = 0; i < resources.objects.size(); ++i) {
-        if (!gpu_buffer::write_buffer(
-			graphics::internal::context.allocator,
-            resources.objects[i].uniform_allocation,
+    auto& object_uniforms = resources.object_uniforms;
+
+    for (std::size_t i = 0; i < uniforms.objects.size(); ++i) {
+        const std::size_t offset = static_cast<std::size_t>(
+            object_uniforms.stride * i
+        );
+
+        std::memcpy(
+            object_uniforms.upload_data.data() + offset,
             &uniforms.objects[i],
             sizeof(uniforms.objects[i])
-        )) {
-            return false;
-        }
+        );
+    }
+
+    if (!gpu_buffer::write_buffer(
+        graphics::internal::context.allocator,
+        object_uniforms.allocation,
+        object_uniforms.upload_data.data(),
+        object_uniforms.upload_data.size()
+    )) {
+        return false;
     }
 
     return true;
@@ -1023,6 +1073,11 @@ void render(
 	for (std::size_t i = 0; i < resources.objects.size(); ++i) {
         const auto& object_resources = resources.objects[i];
 
+        const uint32_t dynamic_offset =
+            static_cast<uint32_t>(
+                resources.object_uniforms.stride * i
+            );
+
         vkCmdBindDescriptorSets(
             command_buffer,
             VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -1030,8 +1085,8 @@ void render(
             1,
             1,
             &object_resources.descriptor_set,
-            0,
-            nullptr
+            1,
+            &dynamic_offset
         );
 
         const auto& texture_effect = uniforms.texture_effects[i];
