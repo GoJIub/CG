@@ -1,5 +1,7 @@
 #include "scene_renderer.hpp"
 #include "gpu_buffer.hpp"
+#include "gpu_texture.hpp"
+#include "image_loader.hpp"
 #include "light_gizmos.hpp"
 #include "pipeline_utils.hpp"
 
@@ -60,10 +62,65 @@ struct Resources {
 	SceneResources scene{};
 
 	light_gizmos::Resources gizmos;
+
+	gpu_texture::Resources albedo_texture;
+    gpu_texture::Resources specular_texture;
+    gpu_texture::Resources emissive_texture;
 };
 
 Resources resources;
 
+
+bool load_texture(
+    const char* path,
+    VkFormat format,
+    gpu_texture::Resources& texture
+) {
+    auto& context = graphics::internal::context;
+
+    image_loader::ImageData image;
+
+    if (!image_loader::load_rgba8(path, image)) {
+        std::cerr << "Failed to load texture: " << path << '\n';
+        return false;
+    }
+
+    if (!gpu_texture::create_image(
+        context.allocator,
+        image.width,
+        image.height,
+        format,
+        texture
+    )) {
+        return false;
+    }
+
+    if (!gpu_texture::upload_rgba8(
+        context.device,
+        context.allocator,
+        context.graphics_queue,
+        context.graphics_queue_index,
+        texture.image,
+        image.width,
+        image.height,
+        image.pixels.data()
+    )) {
+        return false;
+    }
+
+    if (!gpu_texture::create_view(
+        context.device,
+        format,
+        texture
+    )) {
+        return false;
+    }
+
+    return gpu_texture::create_sampler(
+        context.device,
+        texture
+    );
+}
 
 void destroy_resources() {
 	auto& context = graphics::internal::context;
@@ -103,6 +160,24 @@ void destroy_resources() {
 		}
 		resources.scene.descriptor_set = VK_NULL_HANDLE;
 	}
+
+	gpu_texture::destroy(
+		context.device,
+		context.allocator,
+		resources.albedo_texture
+	);
+
+	gpu_texture::destroy(
+        context.device,
+        context.allocator,
+        resources.specular_texture
+    );
+
+    gpu_texture::destroy(
+        context.device,
+        context.allocator,
+        resources.emissive_texture
+    );
 
 	if (resources.scene_set_layout != VK_NULL_HANDLE) {
 		vkDestroyDescriptorSetLayout(
@@ -336,6 +411,33 @@ bool initialize() {
 		return false;
 	}
 
+	if (!load_texture(
+        "textures/obsidian_gold/albedo.png",
+        VK_FORMAT_R8G8B8A8_SRGB,
+        resources.albedo_texture
+    )) {
+        destroy_resources();
+        return false;
+    }
+
+    if (!load_texture(
+        "textures/obsidian_gold/specular.png",
+        VK_FORMAT_R8G8B8A8_UNORM,
+        resources.specular_texture
+    )) {
+        destroy_resources();
+        return false;
+    }
+
+    if (!load_texture(
+        "textures/obsidian_gold/emissive.png",
+        VK_FORMAT_R8G8B8A8_SRGB,
+        resources.emissive_texture
+    )) {
+        destroy_resources();
+        return false;
+    }
+
 	if (!gpu_buffer::create_buffer(
 		context.allocator,
 		sizeof(octahedron::vertices),
@@ -431,10 +533,39 @@ bool initialize() {
 			VK_SHADER_STAGE_FRAGMENT_BIT
 	};
 
+    const VkDescriptorSetLayoutBinding object_bindings[] = {
+        global_uniform_binding,
+
+        VkDescriptorSetLayoutBinding{
+            .binding = 1,
+            .descriptorType =
+                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
+        },
+
+		VkDescriptorSetLayoutBinding{
+            .binding = 2,
+            .descriptorType =
+                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
+        },
+
+        VkDescriptorSetLayoutBinding{
+            .binding = 3,
+            .descriptorType =
+                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
+        }
+    };
+
 	const VkDescriptorSetLayoutCreateInfo set_layout_info{
 		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-		.bindingCount = 1,
-		.pBindings = &global_uniform_binding,
+		.bindingCount =
+            static_cast<uint32_t>(std::size(object_bindings)),
+        .pBindings = object_bindings
 	};
 
 	if (vkCreateDescriptorSetLayout(
@@ -487,16 +618,20 @@ bool initialize() {
 	constexpr uint32_t uniform_set_count =
 		static_cast<uint32_t>(scene::object_count + 1);
 
-	const VkDescriptorPoolSize pool_sizes[] = {
-		{
-			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-			uniform_set_count
-		},
-		{
-			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-			2
-		}
-	};
+    const VkDescriptorPoolSize pool_sizes[] = {
+        {
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            uniform_set_count
+        },
+        {
+            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            2
+        },
+        {
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            static_cast<uint32_t>(scene::object_count * 3)
+        }
+    };
 
 	const VkDescriptorPoolCreateInfo pool_info{
 		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
@@ -587,28 +722,78 @@ bool initialize() {
 			return false;
 		}
 
-		const VkDescriptorBufferInfo uniform_buffer_info{
-			.buffer = object_resources.uniform_buffer,
-			.offset = 0,
-			.range = sizeof(scene::ObjectUniformData),
-		};
+        const VkDescriptorBufferInfo uniform_buffer_info{
+            .buffer = object_resources.uniform_buffer,
+            .offset = 0,
+            .range = sizeof(scene::ObjectUniformData)
+        };
 
-		const VkWriteDescriptorSet write_descriptor_set{
-			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-			.dstSet = object_resources.descriptor_set,
-			.dstBinding = 0,
-			.descriptorCount = 1,
-			.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-			.pBufferInfo = &uniform_buffer_info
-		};
+		const VkDescriptorImageInfo albedo_image_info{
+            .sampler = resources.albedo_texture.sampler,
+            .imageView = resources.albedo_texture.view,
+            .imageLayout =
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        };
 
-		vkUpdateDescriptorSets(
-			context.device,
-			1,
-			&write_descriptor_set,
-			0,
-			nullptr
-		);
+		const VkDescriptorImageInfo specular_image_info{
+            .sampler = resources.specular_texture.sampler,
+            .imageView = resources.specular_texture.view,
+            .imageLayout =
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        };
+
+        const VkDescriptorImageInfo emissive_image_info{
+            .sampler = resources.emissive_texture.sampler,
+            .imageView = resources.emissive_texture.view,
+            .imageLayout =
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        };
+
+        const VkWriteDescriptorSet writes[] = {
+            {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = object_resources.descriptor_set,
+                .dstBinding = 0,
+                .descriptorCount = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .pBufferInfo = &uniform_buffer_info
+            },
+            {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = object_resources.descriptor_set,
+                .dstBinding = 1,
+                .descriptorCount = 1,
+                .descriptorType =
+                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .pImageInfo = &albedo_image_info
+            },
+			{
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = object_resources.descriptor_set,
+                .dstBinding = 2,
+                .descriptorCount = 1,
+                .descriptorType =
+                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .pImageInfo = &specular_image_info
+            },
+            {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = object_resources.descriptor_set,
+                .dstBinding = 3,
+                .descriptorCount = 1,
+                .descriptorType =
+                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .pImageInfo = &emissive_image_info
+            }
+        };
+
+        vkUpdateDescriptorSets(
+            context.device,
+            static_cast<uint32_t>(std::size(writes)),
+            writes,
+            0,
+            nullptr
+        );
 	}
 
 	const VkDescriptorSetLayout set_layouts[] = {
@@ -616,11 +801,19 @@ bool initialize() {
 		resources.object_set_layout,
 	};
 
+	const VkPushConstantRange texture_push_range{
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        .offset = 0,
+        .size = sizeof(scene::TexturePushConstants)
+    };
+
 	const VkPipelineLayoutCreateInfo pipeline_layout_info{
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
 		.setLayoutCount =
 			static_cast<uint32_t>(std::size(set_layouts)),
-		.pSetLayouts = set_layouts
+		.pSetLayouts = set_layouts,
+		.pushConstantRangeCount = 1,
+        .pPushConstantRanges = &texture_push_range
 	};
 
 	if (vkCreatePipelineLayout(
@@ -827,16 +1020,30 @@ void render(
 		nullptr
 	);
 
-	for (const auto& object_resources : resources.objects) {
-		vkCmdBindDescriptorSets(
-			command_buffer,
-			VK_PIPELINE_BIND_POINT_GRAPHICS,
-			resources.pipeline_layout,
-			1,
-			1,
-			&object_resources.descriptor_set,
-			0, nullptr
-		);
+	for (std::size_t i = 0; i < resources.objects.size(); ++i) {
+        const auto& object_resources = resources.objects[i];
+
+        vkCmdBindDescriptorSets(
+            command_buffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            resources.pipeline_layout,
+            1,
+            1,
+            &object_resources.descriptor_set,
+            0,
+            nullptr
+        );
+
+        const auto& texture_effect = uniforms.texture_effects[i];
+
+        vkCmdPushConstants(
+            command_buffer,
+            resources.pipeline_layout,
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            0,
+            sizeof(texture_effect),
+            &texture_effect
+        );
 
 		vkCmdDrawIndexed(
 			command_buffer,

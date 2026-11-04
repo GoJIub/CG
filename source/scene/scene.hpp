@@ -31,6 +31,11 @@ struct MaterialSettings {
     glm::vec3 albedo{1.0f};
     glm::vec3 specular_color{0.5f};
     float shininess = 32.0f;
+
+    glm::vec3 emissive_color{1.0f};
+    float emissive_intensity = 1.0f;
+
+    bool animate_texture = false;
 };
 
 struct ObjectSettings {
@@ -128,6 +133,8 @@ struct ObjectUniformData {
     glm::mat4 model{1.0f};
     glm::vec4 albedo{1.0f};
     glm::vec4 specular_shininess{0.0f};
+
+    glm::vec4 emissive_color_intensity{1.0f};
 };
 
 struct PointLightData {
@@ -147,6 +154,16 @@ struct LightMarkerData {
     glm::vec3 color{1.0f};
 };
 
+struct TexturePushConstants {
+    float time = 0.0f;
+    std::uint32_t animation_enabled = 0;
+};
+
+static_assert(sizeof(TexturePushConstants) == 8);
+static_assert(
+    offsetof(TexturePushConstants, animation_enabled) == 4
+);
+
 struct FrameUniformData {
     SceneUniformData scene;
     std::array<ObjectUniformData, object_count> objects;
@@ -154,6 +171,8 @@ struct FrameUniformData {
     std::vector<SpotLightData> spot_lights;
     std::vector<LightMarkerData> light_markers;
     std::vector<glm::mat4> spot_light_cone_models;
+
+    std::array<TexturePushConstants, object_count> texture_effects{};
 };
 
 static_assert(
@@ -182,7 +201,7 @@ static_assert(
 
 static_assert(
     sizeof(ObjectUniformData) ==
-    sizeof(glm::mat4) + sizeof(glm::vec4) * 2
+    sizeof(glm::mat4) + sizeof(glm::vec4) * 3
 );
 
 SceneUniformData compute_scene_uniforms(

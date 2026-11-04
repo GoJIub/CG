@@ -10,7 +10,7 @@ inline constexpr float octahedron_radius = 1.0f;
 
 struct Vertex {
     float position[3];
-    float color[3];
+    float uv[2];
     float normal[3];
 };
 

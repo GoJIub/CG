@@ -35,22 +35,38 @@ layout(std140, set = 1, binding = 0) uniform ObjectUniformData {
     mat4 model;
     vec4 albedo;
     vec4 specular_shininess;
+    vec4 emissive_color_intensity;
 } object_data;
 
-layout(location = 0) in vec3 in_color;
+layout(set = 1, binding = 1) uniform sampler2D albedo_texture;
+layout(set = 1, binding = 2) uniform sampler2D specular_texture;
+layout(set = 1, binding = 3) uniform sampler2D emissive_texture;
+
+layout(push_constant) uniform TexturePushConstants {
+    float time;
+    uint animation_enabled;
+} texture_effect;
+
+layout(location = 0) in vec2 in_uv;
 layout(location = 1) in vec3 in_normal;
 layout(location = 2) in vec3 in_world_position;
 
 layout(location = 0) out vec4 out_color;
 
-vec3 evaluate_blinn_phong(vec3 N, vec3 L, vec3 V) {
+vec3 evaluate_blinn_phong(
+    vec3 N,
+    vec3 L,
+    vec3 V,
+    vec3 albedo,
+    vec3 specular_color
+) {
     float diffuse_factor = max(dot(N, L), 0.0);
 
     if (diffuse_factor <= 0.0) {
         return vec3(0.0);
     }
 
-    vec3 diffuse = object_data.albedo.rgb * diffuse_factor;
+    vec3 diffuse = albedo * diffuse_factor;
 
     float specular_factor = 0.0;
 
@@ -70,8 +86,7 @@ vec3 evaluate_blinn_phong(vec3 N, vec3 L, vec3 V) {
         );
     }
 
-    vec3 specular =
-        object_data.specular_shininess.rgb * specular_factor;
+    vec3 specular = specular_color * specular_factor;
 
     return diffuse + specular;
 }
@@ -79,7 +94,9 @@ vec3 evaluate_blinn_phong(vec3 N, vec3 L, vec3 V) {
 vec3 evaluate_point_light(
     PointLightData light,
     vec3 N,
-    vec3 V
+    vec3 V,
+    vec3 albedo,
+    vec3 specular_color
 ) {
     vec3 to_light = light.position.xyz - in_world_position;
 
@@ -103,13 +120,17 @@ vec3 evaluate_point_light(
 
     return light.color.rgb *
         attenuation *
-        evaluate_blinn_phong(N, L, V);
+        evaluate_blinn_phong(
+            N, L, V, albedo, specular_color
+        );
 }
 
 vec3 evaluate_spot_light(
     SpotLightData light,
     vec3 N,
-    vec3 V
+    vec3 V,
+    vec3 albedo,
+    vec3 specular_color
 ) {
     vec3 from_light = in_world_position - light.position.xyz;
     float distance_squared = dot(from_light, from_light);
@@ -155,11 +176,76 @@ vec3 evaluate_spot_light(
     return cone_factor * evaluate_point_light(
         point_light,
         N,
-        V
+        V,
+        albedo,
+        specular_color
     );
 }
 
 void main() {
+    vec3 albedo =
+        texture(albedo_texture, in_uv).rgb *
+        object_data.albedo.rgb;
+
+    vec3 specular_color =
+        texture(specular_texture, in_uv).rgb *
+        object_data.specular_shininess.rgb;
+
+    vec3 emissive =
+        texture(emissive_texture, in_uv).rgb *
+        object_data.emissive_color_intensity.rgb *
+        object_data.emissive_color_intensity.w;
+
+    if (texture_effect.animation_enabled != 0u) {
+        float time = texture_effect.time;
+
+        vec2 flow_uv_a =
+            in_uv * 1.7 + vec2(0.06, -0.04) * time;
+
+        vec2 flow_uv_b =
+            in_uv * 2.3 + vec2(-0.03, 0.05) * time;
+
+        float flow_a = texture(
+            emissive_texture,
+            flow_uv_a
+        ).r;
+
+        float flow_b = texture(
+            emissive_texture,
+            flow_uv_b
+        ).r;
+
+        float distortion = clamp(
+            2.0 * (flow_a + flow_b),
+            0.0,
+            1.0
+        );
+
+        const float wave_frequency = 12.0;
+        const float wave_speed = 2.5;
+
+        float phase =
+            dot(in_uv, vec2(1.0, 0.65)) * wave_frequency -
+            time * wave_speed +
+            distortion * 2.5;
+
+        float wave = smoothstep(
+            0.25,
+            0.9,
+            sin(phase)
+        );
+
+        float brightness = mix(0.05, 3.0, wave);
+
+        vec3 glow_tint = mix(
+            vec3(1.0, 0.22, 0.04),
+            vec3(1.0, 0.95, 0.7),
+            wave
+        );
+
+        emissive *= brightness * glow_tint;
+    }
+
     vec3 N = normalize(in_normal);
 
     vec3 L = normalize(
@@ -171,11 +257,13 @@ void main() {
     );
 
     vec3 ambient =
-        scene_data.ambient_light.rgb * object_data.albedo.rgb;
+        scene_data.ambient_light.rgb * albedo;
 
     vec3 directional =
         scene_data.directional_light_color.rgb *
-        evaluate_blinn_phong(N, L, V);
+        evaluate_blinn_phong(
+            N, L, V, albedo, specular_color
+        );
 
     vec3 result = ambient + directional;
 
@@ -183,7 +271,9 @@ void main() {
         result += evaluate_point_light(
             point_light_buffer.lights[i],
             N,
-            V
+            V,
+            albedo,
+            specular_color
         );
     }
 
@@ -191,9 +281,11 @@ void main() {
         result += evaluate_spot_light(
             spot_light_buffer.lights[i],
             N,
-            V
+            V,
+            albedo,
+            specular_color
         );
     }
 
-    out_color = vec4(result, 1.0);
+    out_color = vec4(result + emissive, 1.0);
 }

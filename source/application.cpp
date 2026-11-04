@@ -74,6 +74,12 @@ bool update(double time, GLFWwindow* window) {
 			object.animation,
 			scene_state.center_mode
 		);
+
+        uniforms.texture_effects[i] = {
+            .time = static_cast<float>(time),
+            .animation_enabled =
+                object.settings.material.animate_texture ? 1u : 0u
+        };
 	}
 
 	uniforms.point_lights.resize(scene_state.point_lights.size());

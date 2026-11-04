@@ -206,6 +206,11 @@ ObjectUniformData compute_object_uniforms(
 		object.material.shininess
 	);
 
+    uniforms.emissive_color_intensity = glm::vec4(
+        object.material.emissive_color,
+        object.material.emissive_intensity
+    );
+
     return uniforms;
 }
 

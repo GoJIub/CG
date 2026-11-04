@@ -214,6 +214,25 @@ void draw_object_controls(scene::SceneState& state) {
 		ImGuiSliderFlags_AlwaysClamp
 	);
 
+	ImGui::ColorEdit3(
+        "Emissive color",
+        &object.material.emissive_color.x
+    );
+
+    ImGui::SliderFloat(
+        "Emissive intensity",
+        &object.material.emissive_intensity,
+        0.0f,
+        5.0f,
+        "%.2f",
+        ImGuiSliderFlags_AlwaysClamp
+    );
+
+	ImGui::Checkbox(
+        "Animate texture",
+        &object.material.animate_texture
+    );
+
 	ImGui::SliderFloat(
 		"Trajectory radius",
 		&object.trajectory_radius,

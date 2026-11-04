@@ -1,7 +1,7 @@
 #version 450
 
 layout(location = 0) in vec3 in_position;
-layout(location = 1) in vec3 in_color;
+layout(location = 1) in vec2 in_uv;
 layout(location = 2) in vec3 in_normal;
 
 layout(std140, set = 0, binding = 0) uniform SceneUniformData {
@@ -19,9 +19,10 @@ layout(std140, set = 1, binding = 0) uniform ObjectUniformData {
     mat4 model;
     vec4 albedo;
     vec4 specular_shininess;
+    vec4 emissive_color_intensity;
 } object_data;
 
-layout(location = 0) out vec3 out_color;
+layout(location = 0) out vec2 out_uv;
 layout(location = 1) out vec3 out_normal;
 layout(location = 2) out vec3 out_world_position;
 
@@ -34,7 +35,7 @@ void main() {
     gl_Position =
         scene_data.view_projection * world_position;
 
-    out_color = in_color;
+    out_uv = in_uv;
 
     mat3 normal_matrix =
         transpose(inverse(mat3(object_data.model)));
