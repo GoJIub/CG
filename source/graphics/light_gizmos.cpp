@@ -1,5 +1,5 @@
 #include "light_gizmos.hpp"
-#include "gpu_buffer.hpp"
+#include "gpu_upload.hpp"
 #include "pipeline_utils.hpp"
 
 #include "geometry/sphere_mesh.hpp"
@@ -11,27 +11,17 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
-namespace {
-
-struct MarkerPushConstants {
-    glm::mat4 model{1.0f};
-    glm::vec4 color{1.0f};
-};
-
-static_assert(offsetof(MarkerPushConstants, color) == 64);
-static_assert(sizeof(MarkerPushConstants) == 80);
-
-}
-
-
 namespace light_gizmos {
 
 bool initialize(
     Resources& gizmos,
     VkDevice device,
     VmaAllocator allocator,
+    VkQueue queue,
+    std::uint32_t queue_family_index,
     VkRenderPass render_pass,
-    VkDescriptorSetLayout scene_set_layout
+    VkDescriptorSetLayout scene_set_layout,
+    VkDescriptorSetLayout object_set_layout
 ) {
     gizmos.markers.vertex_shader =
 		pipeline_utils::load_shader_module(device, "shaders/light_marker.vert.spv");
@@ -47,8 +37,11 @@ bool initialize(
 		return false;
 	}
 
-    if (!gpu_buffer::create_buffer(
+	if (!gpu_upload::create_geometry_buffer(
+		device,
 		allocator,
+		queue,
+		queue_family_index,
 		sizeof(sphere::vertices),
 		VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
 		sphere::vertices.data(),
@@ -58,8 +51,11 @@ bool initialize(
 		return false;
 	}
 
-	if (!gpu_buffer::create_buffer(
+	if (!gpu_upload::create_geometry_buffer(
+		device,
 		allocator,
+		queue,
+		queue_family_index,
 		sizeof(sphere::indices),
 		VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
 		sphere::indices.data(),
@@ -69,8 +65,11 @@ bool initialize(
 		return false;
 	}
 
-	if (!gpu_buffer::create_buffer(
+	if (!gpu_upload::create_geometry_buffer(
+		device,
 		allocator,
+		queue,
+		queue_family_index,
 		sizeof(cone::vertices),
 		VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
 		cone::vertices.data(),
@@ -80,19 +79,17 @@ bool initialize(
 		return false;
 	}
 
-    const VkPushConstantRange marker_push_constant_range{
-		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-		.offset = 0,
-		.size = sizeof(MarkerPushConstants)
-	};
+    const VkDescriptorSetLayout set_layouts[] = {
+        scene_set_layout,
+        object_set_layout
+    };
 
-	const VkPipelineLayoutCreateInfo marker_layout_info{
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-		.setLayoutCount = 1,
-		.pSetLayouts = &scene_set_layout,
-		.pushConstantRangeCount = 1,
-		.pPushConstantRanges = &marker_push_constant_range
-	};
+    const VkPipelineLayoutCreateInfo marker_layout_info{
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount =
+            static_cast<std::uint32_t>(std::size(set_layouts)),
+        .pSetLayouts = set_layouts
+    };
 
 	if (vkCreatePipelineLayout(
 		device,
@@ -243,9 +240,12 @@ void render_light_markers(
     const Resources& gizmos,
     VkCommandBuffer command_buffer,
     VkDescriptorSet scene_descriptor_set,
-    const std::vector<scene::LightMarkerData>& markers
+    VkDescriptorSet object_descriptor_set,
+    std::size_t marker_count,
+    std::size_t first_record,
+    VkDeviceSize stride
 ) {
-    if (markers.empty()) {
+    if (marker_count == 0) {
         return;
     }
 
@@ -283,30 +283,21 @@ void render_light_markers(
         nullptr
     );
 
-    constexpr float marker_radius = 0.08f;
+	for (std::size_t i = 0; i < marker_count; ++i) {
+        const std::uint32_t dynamic_offset =
+            static_cast<std::uint32_t>(
+                stride * (first_record + i)
+            );
 
-    for (const auto& marker : markers) {
-        MarkerPushConstants constants{};
-
-        constants.model = glm::translate(
-            glm::mat4(1.0f),
-            marker.position
-        );
-
-        constants.model = glm::scale(
-            constants.model,
-            glm::vec3(marker_radius)
-        );
-
-        constants.color = glm::vec4(marker.color, 1.0f);
-
-        vkCmdPushConstants(
+        vkCmdBindDescriptorSets(
             command_buffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
             gizmos.markers.pipeline_layout,
-            VK_SHADER_STAGE_VERTEX_BIT,
-            0,
-            sizeof(constants),
-            &constants
+            1,
+            1,
+            &object_descriptor_set,
+            1,
+            &dynamic_offset
         );
 
         vkCmdDrawIndexed(
@@ -324,9 +315,12 @@ void render_spot_light_cones(
     const Resources& gizmos,
     VkCommandBuffer command_buffer,
     VkDescriptorSet scene_descriptor_set,
-    const std::vector<glm::mat4>& models
+    VkDescriptorSet object_descriptor_set,
+    std::size_t cone_count,
+    std::size_t first_record,
+    VkDeviceSize stride
 ) {
-    if (models.empty()) {
+    if (cone_count == 0) {
         return;
     }
 
@@ -357,18 +351,21 @@ void render_spot_light_cones(
         nullptr
     );
 
-    for (const auto& model : models) {
-        MarkerPushConstants constants{};
-        constants.model = model;
-        constants.color = glm::vec4(1.0f);
+    for (std::size_t i = 0; i < cone_count; ++i) {
+        const std::uint32_t dynamic_offset =
+            static_cast<std::uint32_t>(
+                stride * (first_record + i)
+            );
 
-        vkCmdPushConstants(
+        vkCmdBindDescriptorSets(
             command_buffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
             gizmos.markers.pipeline_layout,
-            VK_SHADER_STAGE_VERTEX_BIT,
-            0,
-            sizeof(constants),
-            &constants
+            1,
+            1,
+            &object_descriptor_set,
+            1,
+            &dynamic_offset
         );
 
         vkCmdDraw(

@@ -75,12 +75,22 @@ bool update(double time, GLFWwindow* window) {
 			scene_state.center_mode
 		);
 
+		uniforms.material_ids[i] =
+            object.settings.material_id;
+
         uniforms.texture_effects[i] = {
             .time = static_cast<float>(time),
             .animation_enabled =
                 object.settings.material.animate_texture ? 1u : 0u
         };
 	}
+
+	uniforms.floor = scene::compute_floor_uniforms(
+        scene_state.floor
+    );
+
+    uniforms.floor_material_id =
+        scene_state.floor.material_id;
 
 	uniforms.point_lights.resize(scene_state.point_lights.size());
 
@@ -145,6 +155,27 @@ bool update(double time, GLFWwindow* window) {
 			}
 		}
 	}
+
+	auto& marker_objects = uniforms.marker_objects;
+
+    marker_objects.clear();
+    marker_objects.reserve(
+        markers.size() + cone_models.size()
+    );
+
+    for (const auto& marker : markers) {
+        marker_objects.push_back(
+            scene::compute_light_marker_uniforms(marker)
+        );
+    }
+
+    for (const auto& model : cone_models) {
+        scene::ObjectUniformData cone_uniforms{};
+        cone_uniforms.model = model;
+        cone_uniforms.albedo = glm::vec4(1.0f);
+
+        marker_objects.push_back(cone_uniforms);
+    }
 
 	if (!scene_renderer::update_uniform_buffers(uniforms)) {
 		return false;

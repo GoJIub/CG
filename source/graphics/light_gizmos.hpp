@@ -43,8 +43,11 @@ bool initialize(
     Resources& gizmos,
     VkDevice device,
     VmaAllocator allocator,
+    VkQueue queue,
+    std::uint32_t queue_family_index,
     VkRenderPass render_pass,
-    VkDescriptorSetLayout scene_set_layout
+    VkDescriptorSetLayout scene_set_layout,
+    VkDescriptorSetLayout object_set_layout
 );
 
 void destroy(
@@ -57,14 +60,20 @@ void render_light_markers(
     const Resources& gizmos,
     VkCommandBuffer command_buffer,
     VkDescriptorSet scene_descriptor_set,
-    const std::vector<scene::LightMarkerData>& markers
+    VkDescriptorSet object_descriptor_set,
+    std::size_t marker_count,
+    std::size_t first_record,
+    VkDeviceSize stride
 );
 
 void render_spot_light_cones(
     const Resources& gizmos,
     VkCommandBuffer command_buffer,
     VkDescriptorSet scene_descriptor_set,
-    const std::vector<glm::mat4>& models
+    VkDescriptorSet object_descriptor_set,
+    std::size_t cone_count,
+    std::size_t first_record,
+    VkDeviceSize stride
 );
 
 } // namespace light_gizmos

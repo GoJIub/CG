@@ -1,5 +1,6 @@
 #include "graphics_internal.hpp"
 
+#include <algorithm>
 #include <iostream>
 #include <vector>
 
@@ -405,6 +406,14 @@ bool initialize(GLFWwindow* const window) {
 
 	auto vkb_physical_device = pds_result.value();
 
+	VkPhysicalDeviceFeatures optional_features{};
+    optional_features.samplerAnisotropy = VK_TRUE;
+
+    const bool anisotropy_enabled =
+        vkb_physical_device.enable_features_if_present(
+            optional_features
+        );
+
 	vkb::DeviceBuilder db(vkb_physical_device);
 
 	auto db_result = db.build();
@@ -417,6 +426,22 @@ bool initialize(GLFWwindow* const window) {
 
 	context.physical_device = vkb_device.physical_device;
 	context.device = vkb_device.device;
+	context.sampler_anisotropy = 1.0f;
+
+    if (anisotropy_enabled) {
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(
+            context.physical_device,
+            &properties
+        );
+
+        constexpr float desired_anisotropy = 16.0f;
+
+        context.sampler_anisotropy = std::min(
+            desired_anisotropy,
+            properties.limits.maxSamplerAnisotropy
+        );
+    }
 
 	if (auto result = vkb_device.get_queue(vkb::QueueType::graphics); result) {
 		context.graphics_queue = result.value();

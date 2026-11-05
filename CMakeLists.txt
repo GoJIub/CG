@@ -8,10 +8,12 @@ add_executable(
 	source/main.cpp
 	source/application.cpp
 	source/geometry/cone_mesh.cpp
+	source/geometry/floor_mesh.cpp
 	source/geometry/octahedron_mesh.cpp
 	source/geometry/sphere_mesh.cpp
 	source/graphics/gpu_buffer.cpp
 	source/graphics/gpu_texture.cpp
+	source/graphics/gpu_upload.cpp
 	source/graphics/graphics_internal.cpp
 	source/graphics/image_loader.cpp
 	source/graphics/light_gizmos.cpp
@@ -137,8 +139,8 @@ if(GLSLC_FOUND)
 		list(APPEND _SHADER_BINARIES ${SHADER_BINARY_PATH})
 	endmacro()
 
-	compile_shader(octahedron.vert)
-	compile_shader(octahedron.frag)
+	compile_shader(mesh.vert)
+	compile_shader(mesh.frag)
 
 	compile_shader(light_marker.vert)
 	compile_shader(light_marker.frag)

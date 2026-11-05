@@ -128,6 +128,57 @@ void draw_camera_controls(scene::CameraSettings& camera) {
 	}
 }
 
+void draw_material_selector(scene::MaterialId& material_id) {
+    const std::size_t selected_index =
+        static_cast<std::size_t>(material_id);
+
+    const auto& selected =
+        scene::material_descriptions.at(selected_index);
+
+    if (ImGui::BeginCombo("Material", selected.name)) {
+        for (std::size_t i = 0;
+             i < scene::material_descriptions.size();
+             ++i) {
+            const bool is_selected = i == selected_index;
+
+            ImGui::PushID(static_cast<int>(i));
+
+            if (ImGui::Selectable(
+                scene::material_descriptions[i].name,
+                is_selected
+            )) {
+                material_id =
+                    static_cast<scene::MaterialId>(i);
+            }
+
+            if (is_selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+
+            ImGui::PopID();
+        }
+
+        ImGui::EndCombo();
+    }
+}
+
+void draw_floor_controls(scene::FloorSettings& floor) {
+    if (!ImGui::CollapsingHeader("Floor")) {
+        return;
+    }
+
+    ImGui::PushID("Floor");
+
+    draw_material_selector(floor.material_id);
+
+    ImGui::ColorEdit3(
+        "Albedo",
+        &floor.material.albedo.x
+    );
+
+    ImGui::PopID();
+}
+
 void draw_object_controls(scene::SceneState& state) {
 	if (!ImGui::CollapsingHeader(
         "Objects",
@@ -194,6 +245,8 @@ void draw_object_controls(scene::SceneState& state) {
 		"%.2f",
 		ImGuiSliderFlags_AlwaysClamp
 	);
+
+    draw_material_selector(object.material_id);
 
 	ImGui::ColorEdit3(
 		"Albedo",
@@ -505,6 +558,7 @@ void draw_scene_controls(
 	draw_camera_controls(state.camera);
 	draw_lighting_controls(state);
 	draw_object_controls(state);
+	draw_floor_controls(state.floor);
 	draw_point_lights_controls(state);
 	draw_spot_lights_controls(state);
 

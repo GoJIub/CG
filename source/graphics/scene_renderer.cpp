@@ -1,10 +1,12 @@
 #include "scene_renderer.hpp"
 #include "gpu_buffer.hpp"
 #include "gpu_texture.hpp"
+#include "gpu_upload.hpp"
 #include "image_loader.hpp"
 #include "light_gizmos.hpp"
 #include "pipeline_utils.hpp"
 
+#include "geometry/floor_mesh.hpp"
 #include "geometry/octahedron_mesh.hpp"
 
 #include <vulkan/vulkan.h>
@@ -35,8 +37,12 @@ struct SceneResources {
     StorageBufferResources spot_lights;
 };
 
-struct ObjectResources {
+struct MaterialResources {
     VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
+
+    gpu_texture::Resources albedo_texture;
+    gpu_texture::Resources specular_texture;
+    gpu_texture::Resources emissive_texture;
 };
 
 struct ObjectUniformResources {
@@ -45,6 +51,16 @@ struct ObjectUniformResources {
     VkDeviceSize stride = 0;
 
     std::vector<std::byte> upload_data;
+
+	std::size_t capacity = 0;
+};
+
+struct IndexedMeshResources {
+    VkBuffer vertex_buffer = VK_NULL_HANDLE;
+    VmaAllocation vertex_allocation = nullptr;
+
+    VkBuffer index_buffer = VK_NULL_HANDLE;
+    VmaAllocation index_allocation = nullptr;
 };
 
 struct Resources {
@@ -62,19 +78,21 @@ struct Resources {
 
 	VkDescriptorSetLayout scene_set_layout = VK_NULL_HANDLE;
 	VkDescriptorSetLayout object_set_layout = VK_NULL_HANDLE;
+	VkDescriptorSetLayout marker_set_layout = VK_NULL_HANDLE;
+
+    VkDescriptorSet marker_descriptor_set = VK_NULL_HANDLE;
 
 	VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
 
-	std::array<ObjectResources, scene::object_count> objects{};
+	std::array<MaterialResources, scene::material_count> materials{};
 	ObjectUniformResources object_uniforms;
+	IndexedMeshResources floor_mesh;
 
 	SceneResources scene{};
 
 	light_gizmos::Resources gizmos;
 
-	gpu_texture::Resources albedo_texture;
-    gpu_texture::Resources specular_texture;
-    gpu_texture::Resources emissive_texture;
+	gpu_texture::Resources black_texture;
 };
 
 Resources resources;
@@ -91,6 +109,26 @@ bool load_texture(
 
     if (!image_loader::load_rgba8(path, image)) {
         std::cerr << "Failed to load texture: " << path << '\n';
+        return false;
+    }
+
+	VkFormatProperties format_properties{};
+    vkGetPhysicalDeviceFormatProperties(
+        context.physical_device,
+        format,
+        &format_properties
+    );
+
+    constexpr VkFormatFeatureFlags required_features =
+        VK_FORMAT_FEATURE_BLIT_SRC_BIT |
+        VK_FORMAT_FEATURE_BLIT_DST_BIT |
+        VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+
+    if ((format_properties.optimalTilingFeatures &
+         required_features) != required_features) {
+        std::cerr
+            << "Texture format does not support linear mipmap blits: "
+            << format << '\n';
         return false;
     }
 
@@ -112,6 +150,7 @@ bool load_texture(
         texture.image,
         image.width,
         image.height,
+		texture.mip_levels,
         image.pixels.data()
     )) {
         return false;
@@ -127,6 +166,56 @@ bool load_texture(
 
     return gpu_texture::create_sampler(
         context.device,
+        context.sampler_anisotropy,
+        texture
+    );
+}
+
+bool create_black_texture() {
+    auto& context = graphics::internal::context;
+    auto& texture = resources.black_texture;
+
+    constexpr std::array<std::uint8_t, 4> pixel{
+        0, 0, 0, 255
+    };
+
+    constexpr VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
+
+    if (!gpu_texture::create_image(
+        context.allocator,
+        1,
+        1,
+        format,
+        texture
+    )) {
+        return false;
+    }
+
+    if (!gpu_texture::upload_rgba8(
+        context.device,
+        context.allocator,
+        context.graphics_queue,
+        context.graphics_queue_index,
+        texture.image,
+        1,
+        1,
+        texture.mip_levels,
+        pixel.data()
+    )) {
+        return false;
+    }
+
+    if (!gpu_texture::create_view(
+        context.device,
+        format,
+        texture
+    )) {
+        return false;
+    }
+
+    return gpu_texture::create_sampler(
+        context.device,
+        context.sampler_anisotropy,
         texture
     );
 }
@@ -164,28 +253,37 @@ void destroy_resources() {
 			nullptr
 		);
 		resources.descriptor_pool = VK_NULL_HANDLE;
-		for (auto& object_resources : resources.objects) {
-			object_resources.descriptor_set = VK_NULL_HANDLE;
-		}
+        for (auto& material : resources.materials) {
+            material.descriptor_set = VK_NULL_HANDLE;
+        }
 		resources.scene.descriptor_set = VK_NULL_HANDLE;
+		resources.marker_descriptor_set = VK_NULL_HANDLE;
 	}
 
-	gpu_texture::destroy(
-		context.device,
-		context.allocator,
-		resources.albedo_texture
-	);
+    for (auto& material : resources.materials) {
+        gpu_texture::destroy(
+            context.device,
+            context.allocator,
+            material.albedo_texture
+        );
 
-	gpu_texture::destroy(
-        context.device,
-        context.allocator,
-        resources.specular_texture
-    );
+        gpu_texture::destroy(
+            context.device,
+            context.allocator,
+            material.specular_texture
+        );
+
+        gpu_texture::destroy(
+            context.device,
+            context.allocator,
+            material.emissive_texture
+        );
+    }
 
     gpu_texture::destroy(
         context.device,
         context.allocator,
-        resources.emissive_texture
+        resources.black_texture
     );
 
 	if (resources.scene_set_layout != VK_NULL_HANDLE) {
@@ -206,6 +304,16 @@ void destroy_resources() {
 		);
 		resources.object_set_layout = VK_NULL_HANDLE;
 	}
+
+    if (resources.marker_set_layout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(
+            context.device,
+            resources.marker_set_layout,
+            nullptr
+        );
+
+        resources.marker_set_layout = VK_NULL_HANDLE;
+    }
 
 	if (resources.scene.uniform_buffer != VK_NULL_HANDLE) {
 		vmaDestroyBuffer(
@@ -241,6 +349,24 @@ void destroy_resources() {
 		resources.scene.point_lights.allocation = nullptr;
 		resources.scene.point_lights.capacity = 0;
 	}
+
+    if (resources.floor_mesh.vertex_buffer != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(
+            context.allocator,
+            resources.floor_mesh.vertex_buffer,
+            resources.floor_mesh.vertex_allocation
+        );
+    }
+
+    if (resources.floor_mesh.index_buffer != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(
+            context.allocator,
+            resources.floor_mesh.index_buffer,
+            resources.floor_mesh.index_allocation
+        );
+    }
+
+    resources.floor_mesh = {};
 
     if (resources.object_uniforms.buffer != VK_NULL_HANDLE) {
         vmaDestroyBuffer(
@@ -399,6 +525,95 @@ bool ensure_storage_buffer_capacity(
     return true;
 }
 
+void update_object_uniform_descriptor(
+    VkDescriptorSet descriptor_set,
+    VkBuffer buffer
+) {
+    const VkDescriptorBufferInfo buffer_info{
+        .buffer = buffer,
+        .offset = 0,
+        .range = sizeof(scene::ObjectUniformData)
+    };
+
+    const VkWriteDescriptorSet write{
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = descriptor_set,
+        .dstBinding = 0,
+        .descriptorCount = 1,
+        .descriptorType =
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+        .pBufferInfo = &buffer_info
+    };
+
+    vkUpdateDescriptorSets(
+        graphics::internal::context.device,
+        1,
+        &write,
+        0,
+        nullptr
+    );
+}
+
+bool ensure_object_uniform_capacity(std::size_t required_count) {
+    auto& object_uniforms = resources.object_uniforms;
+
+    if (required_count <= object_uniforms.capacity) {
+        return true;
+    }
+
+    auto& context = graphics::internal::context;
+
+    const std::size_t new_capacity = std::max(
+        required_count,
+        object_uniforms.capacity * 2
+    );
+
+    const VkDeviceSize new_size =
+        object_uniforms.stride * new_capacity;
+
+    VkBuffer new_buffer = VK_NULL_HANDLE;
+    VmaAllocation new_allocation = nullptr;
+
+    if (!gpu_buffer::create_buffer(
+        context.allocator,
+        new_size,
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        nullptr,
+        new_buffer,
+        new_allocation
+    )) {
+        return false;
+    }
+
+    for (const auto& material : resources.materials) {
+        update_object_uniform_descriptor(
+            material.descriptor_set,
+            new_buffer
+        );
+    }
+
+    update_object_uniform_descriptor(
+        resources.marker_descriptor_set,
+        new_buffer
+    );
+
+    vmaDestroyBuffer(
+        context.allocator,
+        object_uniforms.buffer,
+        object_uniforms.allocation
+    );
+
+    object_uniforms.buffer = new_buffer;
+    object_uniforms.allocation = new_allocation;
+    object_uniforms.capacity = new_capacity;
+
+    object_uniforms.upload_data.resize(
+        static_cast<std::size_t>(new_size)
+    );
+
+    return true;
+}
+
 } // namespace
 
 
@@ -407,46 +622,65 @@ namespace scene_renderer {
 bool initialize() {
 	auto& context = graphics::internal::context;
 
-	resources.vertex_shader = pipeline_utils::load_shader_module(context.device, "shaders/octahedron.vert.spv");
+	resources.vertex_shader = pipeline_utils::load_shader_module(context.device, "shaders/mesh.vert.spv");
 	if (resources.vertex_shader == VK_NULL_HANDLE) {
 		return false;
 	}
 
-	resources.fragment_shader = pipeline_utils::load_shader_module(context.device, "shaders/octahedron.frag.spv");
+	resources.fragment_shader = pipeline_utils::load_shader_module(context.device, "shaders/mesh.frag.spv");
 	if (resources.fragment_shader == VK_NULL_HANDLE) {
 		destroy_resources();
 		return false;
 	}
 
-	if (!load_texture(
-        "textures/obsidian_gold/albedo.png",
-        VK_FORMAT_R8G8B8A8_SRGB,
-        resources.albedo_texture
-    )) {
+    if (!create_black_texture()) {
         destroy_resources();
         return false;
     }
 
-    if (!load_texture(
-        "textures/obsidian_gold/specular.png",
-        VK_FORMAT_R8G8B8A8_UNORM,
-        resources.specular_texture
-    )) {
-        destroy_resources();
-        return false;
+	for (std::size_t i = 0;
+         i < scene::material_descriptions.size();
+         ++i) {
+        const auto& description =
+            scene::material_descriptions[i];
+
+        auto& material = resources.materials[i];
+
+        if (!load_texture(
+            description.albedo_path,
+            VK_FORMAT_R8G8B8A8_SRGB,
+            material.albedo_texture
+        )) {
+            destroy_resources();
+            return false;
+        }
+
+        if (description.specular_path != nullptr &&
+            !load_texture(
+                description.specular_path,
+                VK_FORMAT_R8G8B8A8_UNORM,
+                material.specular_texture
+            )) {
+            destroy_resources();
+            return false;
+        }
+
+        if (description.emissive_path != nullptr &&
+            !load_texture(
+                description.emissive_path,
+                VK_FORMAT_R8G8B8A8_SRGB,
+                material.emissive_texture
+            )) {
+            destroy_resources();
+            return false;
+        }
     }
 
-    if (!load_texture(
-        "textures/obsidian_gold/emissive.png",
-        VK_FORMAT_R8G8B8A8_SRGB,
-        resources.emissive_texture
-    )) {
-        destroy_resources();
-        return false;
-    }
-
-	if (!gpu_buffer::create_buffer(
+	if (!gpu_upload::create_geometry_buffer(
+		context.device,
 		context.allocator,
+		context.graphics_queue,
+		context.graphics_queue_index,
 		sizeof(octahedron::vertices),
 		VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
 		octahedron::vertices.data(),
@@ -457,8 +691,11 @@ bool initialize() {
 		return false;
 	}
 
-	if (!gpu_buffer::create_buffer(
+	if (!gpu_upload::create_geometry_buffer(
+		context.device,
 		context.allocator,
+		context.graphics_queue,
+		context.graphics_queue_index,
 		sizeof(octahedron::indices),
 		VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
 		octahedron::indices.data(),
@@ -468,6 +705,36 @@ bool initialize() {
 		destroy_resources();
 		return false;
 	}
+
+    if (!gpu_upload::create_geometry_buffer(
+        context.device,
+        context.allocator,
+        context.graphics_queue,
+        context.graphics_queue_index,
+        sizeof(floor_mesh::vertices),
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        floor_mesh::vertices.data(),
+        resources.floor_mesh.vertex_buffer,
+        resources.floor_mesh.vertex_allocation
+    )) {
+        destroy_resources();
+        return false;
+    }
+
+    if (!gpu_upload::create_geometry_buffer(
+        context.device,
+        context.allocator,
+        context.graphics_queue,
+        context.graphics_queue_index,
+        sizeof(floor_mesh::indices),
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        floor_mesh::indices.data(),
+        resources.floor_mesh.index_buffer,
+        resources.floor_mesh.index_allocation
+    )) {
+        destroy_resources();
+        return false;
+    }
 
 	const scene::SceneUniformData initial_scene_uniforms{};
 
@@ -549,6 +816,8 @@ bool initialize() {
         static_cast<std::size_t>(buffer_size)
     );
 
+	resources.object_uniforms.capacity = scene::object_count;
+
 	const VkDescriptorSetLayoutBinding global_uniform_binding{
 		.binding = 0,
 		.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
@@ -613,6 +882,23 @@ bool initialize() {
 		return false;
 	}
 
+    const VkDescriptorSetLayoutCreateInfo marker_layout_info{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindings = &object_uniform_binding
+    };
+
+    if (vkCreateDescriptorSetLayout(
+        context.device,
+        &marker_layout_info,
+        nullptr,
+        &resources.marker_set_layout
+    ) != VK_SUCCESS) {
+        std::cerr << "Failed to create marker descriptor layout\n";
+        destroy_resources();
+        return false;
+    }
+
 	const VkDescriptorSetLayoutBinding scene_bindings[] = {
 		global_uniform_binding,
 
@@ -649,8 +935,8 @@ bool initialize() {
 		return false;
 	}
 
-	constexpr uint32_t uniform_set_count =
-		static_cast<uint32_t>(scene::object_count + 1);
+    constexpr uint32_t uniform_set_count =
+        static_cast<uint32_t>(scene::material_count + 2);
 
     const VkDescriptorPoolSize pool_sizes[] = {
         {
@@ -659,7 +945,7 @@ bool initialize() {
         },
         {
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-            static_cast<uint32_t>(scene::object_count)
+            static_cast<uint32_t>(scene::material_count + 1)
         },
         {
             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -667,7 +953,7 @@ bool initialize() {
         },
         {
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            static_cast<uint32_t>(scene::object_count * 3)
+            static_cast<uint32_t>(scene::material_count * 3)
         }
     };
 
@@ -749,11 +1035,11 @@ bool initialize() {
 		.pSetLayouts = &resources.object_set_layout,
 	};
 
-	for (auto& object_resources : resources.objects) {
+    for (auto& material : resources.materials) {
 		if (vkAllocateDescriptorSets(
 			context.device,
 			&allocate_info,
-			&object_resources.descriptor_set
+			&material.descriptor_set
 		) != VK_SUCCESS) {
 			std::cerr << "Failed to allocate descriptor sets\n";
 			destroy_resources();
@@ -766,23 +1052,33 @@ bool initialize() {
             .range = sizeof(scene::ObjectUniformData)
         };
 
+		const auto& specular_texture =
+            material.specular_texture.view != VK_NULL_HANDLE
+                ? material.specular_texture
+                : resources.black_texture;
+
+        const auto& emissive_texture =
+            material.emissive_texture.view != VK_NULL_HANDLE
+                ? material.emissive_texture
+                : resources.black_texture;
+
 		const VkDescriptorImageInfo albedo_image_info{
-            .sampler = resources.albedo_texture.sampler,
-            .imageView = resources.albedo_texture.view,
+            .sampler = material.albedo_texture.sampler,
+            .imageView = material.albedo_texture.view,
             .imageLayout =
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
         };
 
-		const VkDescriptorImageInfo specular_image_info{
-            .sampler = resources.specular_texture.sampler,
-            .imageView = resources.specular_texture.view,
+        const VkDescriptorImageInfo specular_image_info{
+            .sampler = specular_texture.sampler,
+            .imageView = specular_texture.view,
             .imageLayout =
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
         };
 
         const VkDescriptorImageInfo emissive_image_info{
-            .sampler = resources.emissive_texture.sampler,
-            .imageView = resources.emissive_texture.view,
+            .sampler = emissive_texture.sampler,
+            .imageView = emissive_texture.view,
             .imageLayout =
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
         };
@@ -790,7 +1086,7 @@ bool initialize() {
         const VkWriteDescriptorSet writes[] = {
             {
                 .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .dstSet = object_resources.descriptor_set,
+                .dstSet = material.descriptor_set,
                 .dstBinding = 0,
                 .descriptorCount = 1,
 				.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
@@ -798,7 +1094,7 @@ bool initialize() {
             },
             {
                 .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .dstSet = object_resources.descriptor_set,
+                .dstSet = material.descriptor_set,
                 .dstBinding = 1,
                 .descriptorCount = 1,
                 .descriptorType =
@@ -807,7 +1103,7 @@ bool initialize() {
             },
 			{
                 .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .dstSet = object_resources.descriptor_set,
+                .dstSet = material.descriptor_set,
                 .dstBinding = 2,
                 .descriptorCount = 1,
                 .descriptorType =
@@ -816,7 +1112,7 @@ bool initialize() {
             },
             {
                 .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .dstSet = object_resources.descriptor_set,
+                .dstSet = material.descriptor_set,
                 .dstBinding = 3,
                 .descriptorCount = 1,
                 .descriptorType =
@@ -833,6 +1129,28 @@ bool initialize() {
             nullptr
         );
 	}
+
+    const VkDescriptorSetAllocateInfo marker_allocate_info{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = resources.descriptor_pool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &resources.marker_set_layout
+    };
+
+    if (vkAllocateDescriptorSets(
+        context.device,
+        &marker_allocate_info,
+        &resources.marker_descriptor_set
+    ) != VK_SUCCESS) {
+        std::cerr << "Failed to allocate marker descriptor set\n";
+        destroy_resources();
+        return false;
+    }
+
+    update_object_uniform_descriptor(
+        resources.marker_descriptor_set,
+        resources.object_uniforms.buffer
+    );
 
 	const VkDescriptorSetLayout set_layouts[] = {
 		resources.scene_set_layout,
@@ -895,8 +1213,11 @@ bool initialize() {
 		resources.gizmos,
 		context.device,
 		context.allocator,
+		context.graphics_queue,
+		context.graphics_queue_index,
 		context.render_pass,
-		resources.scene_set_layout
+		resources.scene_set_layout,
+        resources.marker_set_layout
 	)) {
 		destroy_resources();
 		return false;
@@ -912,8 +1233,16 @@ void shutdown() {
 	destroy_resources();
 }
 
-
 bool update_uniform_buffers(const scene::FrameUniformData& uniforms) {
+    const std::size_t required_count =
+        uniforms.objects.size() +
+        1 +
+        uniforms.marker_objects.size();
+
+    if (!ensure_object_uniform_capacity(required_count)) {
+        return false;
+    }
+
 	if (!ensure_storage_buffer_capacity(
 		resources.scene.point_lights,
 		uniforms.point_lights.size(),
@@ -976,6 +1305,38 @@ bool update_uniform_buffers(const scene::FrameUniformData& uniforms) {
             object_uniforms.upload_data.data() + offset,
             &uniforms.objects[i],
             sizeof(uniforms.objects[i])
+        );
+    }
+
+    const std::size_t floor_record_index =
+        uniforms.objects.size();
+
+    const std::size_t floor_offset =
+        static_cast<std::size_t>(
+            object_uniforms.stride * floor_record_index
+        );
+
+    std::memcpy(
+        object_uniforms.upload_data.data() + floor_offset,
+        &uniforms.floor,
+        sizeof(uniforms.floor)
+    );
+
+	for (std::size_t i = 0;
+         i < uniforms.marker_objects.size();
+         ++i) {
+        const std::size_t record_index =
+            floor_record_index + 1 + i;
+
+        const std::size_t offset =
+            static_cast<std::size_t>(
+                object_uniforms.stride * record_index
+            );
+
+        std::memcpy(
+            object_uniforms.upload_data.data() + offset,
+            &uniforms.marker_objects[i],
+            sizeof(uniforms.marker_objects[i])
         );
     }
 
@@ -1070,8 +1431,12 @@ void render(
 		nullptr
 	);
 
-	for (std::size_t i = 0; i < resources.objects.size(); ++i) {
-        const auto& object_resources = resources.objects[i];
+    for (std::size_t i = 0; i < uniforms.objects.size(); ++i) {
+        const std::size_t material_index =
+            static_cast<std::size_t>(uniforms.material_ids[i]);
+
+        const auto& material =
+            resources.materials.at(material_index);
 
         const uint32_t dynamic_offset =
             static_cast<uint32_t>(
@@ -1084,7 +1449,7 @@ void render(
             resources.pipeline_layout,
             1,
             1,
-            &object_resources.descriptor_set,
+            &material.descriptor_set,
             1,
             &dynamic_offset
         );
@@ -1110,19 +1475,84 @@ void render(
 		);
 	}
 
-	light_gizmos::render_light_markers(
-		resources.gizmos,
-		command_buffer,
-		resources.scene.descriptor_set,
-		uniforms.light_markers
-	);
+    vkCmdBindVertexBuffers(
+        command_buffer,
+        0,
+        1,
+        &resources.floor_mesh.vertex_buffer,
+        &vertex_buffer_offset
+    );
 
-	light_gizmos::render_spot_light_cones(
-		resources.gizmos,
-		command_buffer,
-		resources.scene.descriptor_set,
-		uniforms.spot_light_cone_models
-	);
+    vkCmdBindIndexBuffer(
+        command_buffer,
+        resources.floor_mesh.index_buffer,
+        0,
+        VK_INDEX_TYPE_UINT16
+    );
+
+    const auto& floor_material = resources.materials.at(
+        static_cast<std::size_t>(uniforms.floor_material_id)
+    );
+
+    const std::uint32_t floor_dynamic_offset =
+        static_cast<std::uint32_t>(
+            resources.object_uniforms.stride *
+            uniforms.objects.size()
+        );
+
+    vkCmdBindDescriptorSets(
+        command_buffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        resources.pipeline_layout,
+        1,
+        1,
+        &floor_material.descriptor_set,
+        1,
+        &floor_dynamic_offset
+    );
+
+    const scene::TexturePushConstants floor_effect{};
+
+    vkCmdPushConstants(
+        command_buffer,
+        resources.pipeline_layout,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        0,
+        sizeof(floor_effect),
+        &floor_effect
+    );
+
+    vkCmdDrawIndexed(
+        command_buffer,
+        static_cast<std::uint32_t>(floor_mesh::indices.size()),
+        1,
+        0,
+        0,
+        0
+    );
+
+    const std::size_t first_marker_record =
+        uniforms.objects.size() + 1;
+
+    light_gizmos::render_light_markers(
+        resources.gizmos,
+        command_buffer,
+        resources.scene.descriptor_set,
+        resources.marker_descriptor_set,
+        uniforms.light_markers.size(),
+        first_marker_record,
+        resources.object_uniforms.stride
+    );
+
+    light_gizmos::render_spot_light_cones(
+        resources.gizmos,
+        command_buffer,
+        resources.scene.descriptor_set,
+        resources.marker_descriptor_set,
+        uniforms.spot_light_cone_models.size(),
+        first_marker_record + uniforms.light_markers.size(),
+        resources.object_uniforms.stride
+    );
 
 	vkCmdEndRenderPass(command_buffer);
 	if (vkEndCommandBuffer(command_buffer) != VK_SUCCESS) {

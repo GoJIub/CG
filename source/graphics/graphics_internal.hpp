@@ -23,6 +23,8 @@ struct Context {
 	VkExtent2D swapchain_extent;
 
 	VkRenderPass render_pass;
+
+	float sampler_anisotropy = 1.0f;
 };
 
 struct FrameData {

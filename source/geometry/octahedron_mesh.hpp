@@ -1,18 +1,16 @@
 #pragma once
 
+#include "mesh_vertex.hpp"
+
 #include <array>
 #include <cstdint>
 #include <vulkan/vulkan_core.h>
 
+using Vertex = geometry::MeshVertex;
+
 namespace octahedron {
 
 inline constexpr float octahedron_radius = 1.0f;
-
-struct Vertex {
-    float position[3];
-    float uv[2];
-    float normal[3];
-};
 
 extern const std::array<Vertex, 24> vertices;
 extern const std::array<uint16_t, 24> indices;

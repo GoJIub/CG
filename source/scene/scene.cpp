@@ -22,6 +22,11 @@ SceneState::SceneState() {
     objects[1].settings.position.x =  half_spacing;
 	objects[1].animation.trajectory_phase = glm::pi<float>();
 
+    objects[0].settings.material_id = MaterialId::LightStone;
+    objects[1].settings.material_id = MaterialId::ObsidianGold;
+
+    objects[1].settings.material.animate_texture = true;
+
 	point_lights.emplace_back();
 	spot_lights.emplace_back();
 }
@@ -50,6 +55,28 @@ void update_animation_state(
 			delta_time *
 			glm::radians(object.rotation_speed_degrees);
 	}
+}
+
+ObjectUniformData compute_light_marker_uniforms(
+    const LightMarkerData& marker
+) {
+    constexpr float marker_radius = 0.08f;
+
+    ObjectUniformData uniforms{};
+
+    uniforms.model = glm::translate(
+        glm::mat4(1.0f),
+        marker.position
+    );
+
+    uniforms.model = glm::scale(
+        uniforms.model,
+        glm::vec3(marker_radius)
+    );
+
+    uniforms.albedo = glm::vec4(marker.color, 1.0f);
+
+    return uniforms;
 }
 
 glm::mat4 compute_camera_world_matrix(
@@ -209,6 +236,39 @@ ObjectUniformData compute_object_uniforms(
     uniforms.emissive_color_intensity = glm::vec4(
         object.material.emissive_color,
         object.material.emissive_intensity
+    );
+
+    return uniforms;
+}
+
+ObjectUniformData compute_floor_uniforms(
+    const FloorSettings& floor
+) {
+    ObjectUniformData uniforms{};
+
+    uniforms.model = glm::translate(
+        glm::mat4(1.0f),
+        floor.position
+    );
+
+    uniforms.model = glm::scale(
+        uniforms.model,
+        floor.scale
+    );
+
+    uniforms.albedo = glm::vec4(
+        floor.material.albedo,
+        1.0f
+    );
+
+    uniforms.specular_shininess = glm::vec4(
+        floor.material.specular_color,
+        floor.material.shininess
+    );
+
+    uniforms.emissive_color_intensity = glm::vec4(
+        floor.material.emissive_color,
+        floor.material.emissive_intensity
     );
 
     return uniforms;

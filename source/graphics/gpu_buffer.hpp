@@ -23,4 +23,19 @@ bool write_buffer(
     std::size_t size
 );
 
+bool create_device_buffer(
+    VmaAllocator allocator,
+    VkDeviceSize size,
+    VkBufferUsageFlags usage,
+    VkBuffer& out_buffer,
+    VmaAllocation& out_allocation
+);
+
+void record_geometry_upload(
+    VkCommandBuffer command_buffer,
+    VkBuffer staging_buffer,
+    VkBuffer destination_buffer,
+    VkDeviceSize size
+);
+
 } // namespace gpu_buffer

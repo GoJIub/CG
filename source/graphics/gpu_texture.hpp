@@ -13,6 +13,7 @@ struct Resources {
 
     VkImageView view = VK_NULL_HANDLE;
     VkSampler sampler = VK_NULL_HANDLE;
+    std::uint32_t mip_levels = 1;
 };
 
 bool create_image(
@@ -34,7 +35,8 @@ void record_upload_rgba8(
     VkBuffer staging_buffer,
     VkImage image,
     std::uint32_t width,
-    std::uint32_t height
+    std::uint32_t height,
+    std::uint32_t mip_levels
 );
 
 bool upload_rgba8(
@@ -45,6 +47,7 @@ bool upload_rgba8(
     VkImage image,
     std::uint32_t width,
     std::uint32_t height,
+    std::uint32_t mip_levels,
     const void* pixels
 );
 
@@ -56,6 +59,7 @@ bool create_view(
 
 bool create_sampler(
     VkDevice device,
+    float anisotropy,
     Resources& texture
 );
 

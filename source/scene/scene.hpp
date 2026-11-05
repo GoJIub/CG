@@ -1,5 +1,7 @@
 #pragma once
 
+#include "materials.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -38,6 +40,14 @@ struct MaterialSettings {
     bool animate_texture = false;
 };
 
+struct FloorSettings {
+    glm::vec3 position{0.0f, -1.5f, 0.0f};
+    glm::vec3 scale{6.0f, 1.0f, 6.0f};
+
+    MaterialId material_id = MaterialId::LightStone;
+    MaterialSettings material;
+};
+
 struct ObjectSettings {
 	float rotation_speed_degrees = 35.0f;
 	glm::vec3 rotation_axis{ 0.0f, 1.0f, 0.0f };
@@ -49,7 +59,8 @@ struct ObjectSettings {
 	float trajectory_height = 0.35f;
 	float trajectory_speed = 1.0f;
 
-	MaterialSettings material;
+    MaterialId material_id = MaterialId::ObsidianGold;
+    MaterialSettings material;
 };
 
 struct AnimationState {
@@ -105,6 +116,8 @@ struct SceneState {
     std::vector<PointLightSettings> point_lights;
     std::vector<SpotLightSettings> spot_lights;
 
+    FloorSettings floor;
+
     bool show_point_light_gizmos = true;
     bool show_spot_light_gizmos = true;
     float spot_light_cone_length = 2.0f;
@@ -154,6 +167,10 @@ struct LightMarkerData {
     glm::vec3 color{1.0f};
 };
 
+ObjectUniformData compute_light_marker_uniforms(
+    const LightMarkerData& marker
+);
+
 struct TexturePushConstants {
     float time = 0.0f;
     std::uint32_t animation_enabled = 0;
@@ -173,6 +190,12 @@ struct FrameUniformData {
     std::vector<glm::mat4> spot_light_cone_models;
 
     std::array<TexturePushConstants, object_count> texture_effects{};
+    std::array<MaterialId, object_count> material_ids{};
+
+    std::vector<ObjectUniformData> marker_objects;
+
+    ObjectUniformData floor;
+    MaterialId floor_material_id = MaterialId::LightStone;
 };
 
 static_assert(
@@ -213,6 +236,10 @@ ObjectUniformData compute_object_uniforms(
     ObjectSettings& object,
     const AnimationState& animation,
     TrajectoryCenterMode center_mode
+);
+
+ObjectUniformData compute_floor_uniforms(
+    const FloorSettings& floor
 );
 
 PointLightData compute_point_light_data(
