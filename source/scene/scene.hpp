@@ -42,9 +42,9 @@ struct MaterialSettings {
 
 struct FloorSettings {
     glm::vec3 position{0.0f, -1.5f, 0.0f};
-    glm::vec3 scale{6.0f, 1.0f, 6.0f};
+    glm::vec3 scale{32.0f, 1.0f, 32.0f};
 
-    MaterialId material_id = MaterialId::LightStone;
+    MaterialId material_id = MaterialId::Checkerboard;
     MaterialSettings material;
 };
 

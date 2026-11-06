@@ -5,7 +5,7 @@ namespace floor_mesh {
 namespace {
 
 constexpr float half_extent = 1.0f;
-constexpr float texture_repeats = 4.0f;
+constexpr float texture_repeats = 32.0f;
 
 } // namespace
 
