@@ -9,6 +9,7 @@ add_executable(
 	source/application.cpp
 	source/geometry/cone_mesh.cpp
 	source/geometry/floor_mesh.cpp
+	source/geometry/mesh_vertex.cpp
 	source/geometry/octahedron_mesh.cpp
 	source/geometry/sphere_mesh.cpp
 	source/graphics/gpu_buffer.cpp
@@ -17,6 +18,7 @@ add_executable(
 	source/graphics/graphics_internal.cpp
 	source/graphics/image_loader.cpp
 	source/graphics/light_gizmos.cpp
+    source/graphics/materials_gpu.cpp
 	source/graphics/pipeline_utils.cpp
 	source/graphics/scene_renderer.cpp
 	source/input/camera_controller.cpp

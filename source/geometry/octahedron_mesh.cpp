@@ -36,34 +36,6 @@ const std::array<uint16_t, 24> source_indices = {
 	5, 1, 4
 };
 
-const VkVertexInputBindingDescription vertex_binding_description{
-	.binding = 0,
-	.stride = sizeof(Vertex),
-	.inputRate = VK_VERTEX_INPUT_RATE_VERTEX
-};
-
-const std::array<VkVertexInputAttributeDescription, 3> vertex_attribute_descriptions = {
-	VkVertexInputAttributeDescription{
-		.location = 0,
-		.binding = 0,
-		.format = VK_FORMAT_R32G32B32_SFLOAT,
-		.offset = offsetof(Vertex, position)
-	},
-	VkVertexInputAttributeDescription{
-		.location = 1,
-		.binding = 0,
-		.format = VK_FORMAT_R32G32_SFLOAT,
-		.offset = offsetof(Vertex, uv)
-	},
-	VkVertexInputAttributeDescription{
-		.location = 2,
-		.binding = 0,
-		.format = VK_FORMAT_R32G32B32_SFLOAT,
-		.offset = offsetof(Vertex, normal)
-	}
-};
-
-
 void set_normal(Vertex& vertex, const glm::vec3& normal) {
 	for (int i = 0; i < 3; ++i) {
 		vertex.normal[i] = normal[i];
