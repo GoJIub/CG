@@ -69,6 +69,7 @@ bool update(double time, GLFWwindow* window) {
 	uniforms.shadow = scene_state.directional_light.shadow;
 	uniforms.scene.light_view_projection = scene::compute_light_view_projection(
 		glm::vec3(uniforms.scene.directional_light_direction),
+		scene_state.camera.position,
 		uniforms.shadow.orthographic_half_extent
 	);
 

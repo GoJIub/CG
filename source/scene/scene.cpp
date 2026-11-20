@@ -183,13 +183,14 @@ SceneUniformData compute_scene_uniforms(
 
 glm::mat4 compute_light_view_projection(
     const glm::vec3& direction,
+    const glm::vec3& camera_position,
     float half_extent
 ) {
     constexpr float light_distance = 12.0f;
     constexpr float near_plane = 0.1f;
     constexpr float far_plane = 30.0f;
 
-    const glm::vec3 target{0.0f};
+    const glm::vec3 target = camera_position;
     const glm::vec3 eye = target - direction * light_distance;
 
     const glm::vec3 world_up{0.0f, 1.0f, 0.0f};

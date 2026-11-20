@@ -247,6 +247,7 @@ SceneUniformData compute_scene_uniforms(
 
 glm::mat4 compute_light_view_projection(
     const glm::vec3& direction,
+    const glm::vec3& camera_position,
     float half_extent
 );
 
