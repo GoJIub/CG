@@ -379,7 +379,7 @@ bool initialize(GLFWwindow* const window) {
 
 	vkb::InstanceBuilder ib;
 
-	auto ibr = ib.require_api_version(VK_MAKE_VERSION(1, 1, 0))
+	auto ibr = ib.require_api_version(VK_MAKE_VERSION(1, 3, 0))
 				 .request_validation_layers()
 				 .build();
 
@@ -394,11 +394,18 @@ bool initialize(GLFWwindow* const window) {
 		return false;
 	}
 
-	vkb::PhysicalDeviceSelector pds(vkb_instance, vk_surface);
+	VkPhysicalDeviceVulkan13Features features13{};
+	features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+	features13.dynamicRendering = VK_TRUE;
 
-	auto pds_result = pds.prefer_gpu_device_type(vkb::PreferredDeviceType::discrete)
-						 .require_present()
-						 .select();
+	vkb::PhysicalDeviceSelector pds(vkb_instance, vk_surface);
+	auto pds_result = pds
+		.set_minimum_version(1, 3)
+		.set_required_features_13(features13)
+		.prefer_gpu_device_type(vkb::PreferredDeviceType::discrete)
+		.require_present()
+		.select();
+
 	if (!pds_result) {
 		std::cerr << pds_result.error().message() << '\n';
 		return false;
