@@ -82,10 +82,18 @@ enum class TrajectoryCenterMode {
     WorldOrigin
 };
 
+struct DirectionalShadowSettings {
+    float orthographic_half_extent = 6.0f;
+    float depth_bias_constant = 1.25f;
+    float depth_bias_slope = 1.0f;
+};
+
 struct DirectionalLightSettings {
     glm::vec3 direction{-1.0f, -1.0f, -1.0f};
     glm::vec3 color{1.0f};
     float intensity = 1.0f;
+
+    DirectionalShadowSettings shadow;
 };
 
 struct PointLightSettings {
@@ -140,6 +148,9 @@ struct SceneUniformData {
     glm::vec4 ambient_light{0.0f};
 
     glm::uvec4 light_counts{0u};
+
+    glm::mat4 light_view_projection{1.0f};
+    glm::mat4 spot_light_view_projection{1.0f};
 };
 
 struct ObjectUniformData {
@@ -196,6 +207,8 @@ struct FrameUniformData {
 
     ObjectUniformData floor;
     MaterialId floor_material_id = MaterialId::LightStone;
+
+    DirectionalShadowSettings shadow;
 };
 
 static_assert(
@@ -217,7 +230,7 @@ static_assert(
 
 static_assert(
     sizeof(SceneUniformData) ==
-    sizeof(glm::mat4) +
+    sizeof(glm::mat4) * 3 +
     sizeof(glm::vec4) * 4 +
     sizeof(glm::uvec4)
 );
@@ -230,6 +243,11 @@ static_assert(
 SceneUniformData compute_scene_uniforms(
     const SceneState& state,
     float aspect_ratio
+);
+
+glm::mat4 compute_light_view_projection(
+    const glm::vec3& direction,
+    float half_extent
 );
 
 ObjectUniformData compute_object_uniforms(
@@ -248,6 +266,10 @@ PointLightData compute_point_light_data(
 
 SpotLightData compute_spot_light_data(
     const SpotLightSettings& light
+);
+
+glm::mat4 compute_spot_light_view_projection(
+    const SpotLightData& light
 );
 
 glm::mat4 compute_spot_light_cone_model(

@@ -181,6 +181,33 @@ SceneUniformData compute_scene_uniforms(
     return uniforms;
 }
 
+glm::mat4 compute_light_view_projection(
+    const glm::vec3& direction,
+    float half_extent
+) {
+    constexpr float light_distance = 12.0f;
+    constexpr float near_plane = 0.1f;
+    constexpr float far_plane = 30.0f;
+
+    const glm::vec3 target{0.0f};
+    const glm::vec3 eye = target - direction * light_distance;
+
+    const glm::vec3 world_up{0.0f, 1.0f, 0.0f};
+    const glm::vec3 up = glm::abs(glm::dot(direction, world_up)) > 0.99f
+        ? glm::vec3{0.0f, 0.0f, 1.0f}
+        : world_up;
+
+    const glm::mat4 view = glm::lookAt(eye, target, up);
+    glm::mat4 projection = glm::ortho(
+        -half_extent, half_extent,
+        -half_extent, half_extent,
+        near_plane, far_plane
+    );
+    projection[1][1] *= -1.0f;
+
+    return projection * view;
+}
+
 ObjectUniformData compute_object_uniforms(
     ObjectSettings& object,
     const AnimationState& animation,
@@ -325,6 +352,36 @@ SpotLightData compute_spot_light_data(
     );
 
     return data;
+}
+
+glm::mat4 compute_spot_light_view_projection(
+    const SpotLightData& light
+) {
+    constexpr float near_plane = 0.1f;
+    constexpr float far_plane = 30.0f;
+    constexpr float min_fov_degrees = 1.0f;
+
+    const glm::vec3 position(light.position);
+    const glm::vec3 direction(light.direction);
+    const glm::vec3 world_up{0.0f, 1.0f, 0.0f};
+    const glm::vec3 up = glm::abs(glm::dot(direction, world_up)) > 0.99f
+        ? glm::vec3{0.0f, 0.0f, 1.0f}
+        : world_up;
+
+    const glm::mat4 view = glm::lookAt(position, position + direction, up);
+
+    const float outer_half_angle = glm::acos(
+        glm::clamp(light.cone_cosines.y, -1.0f, 1.0f)
+    );
+    const float fov = glm::max(
+        2.0f * outer_half_angle,
+        glm::radians(min_fov_degrees)
+    );
+
+    glm::mat4 projection = glm::perspective(fov, 1.0f, near_plane, far_plane);
+    projection[1][1] *= -1.0f;
+
+    return projection * view;
 }
 
 glm::mat4 compute_spot_light_cone_model(

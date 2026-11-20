@@ -9,7 +9,13 @@ layout(std140, set = 0, binding = 0) uniform SceneUniformData {
     vec4 ambient_light;
 
     uvec4 light_counts;
+
+    mat4 light_view_projection;
+    mat4 spot_light_view_projection;
 } scene_data;
+
+layout(set = 0, binding = 3) uniform sampler2DShadow shadow_map;
+layout(set = 0, binding = 4) uniform sampler2DShadow spot_shadow_map;
 
 struct PointLightData {
     vec4 position;
@@ -182,6 +188,28 @@ vec3 evaluate_spot_light(
     );
 }
 
+float shadow_visibility(
+    sampler2DShadow depth_map,
+    mat4 light_view_projection,
+    vec3 world_position
+) {
+    vec4 clip = light_view_projection * vec4(world_position, 1.0);
+    if (clip.w <= 0.0) {
+        return 1.0;
+    }
+
+    vec3 ndc = clip.xyz / clip.w;
+    vec2 uv = ndc.xy * 0.5 + 0.5;
+
+    if (ndc.z < 0.0 || ndc.z >= 1.0 ||
+        any(lessThan(uv, vec2(0.0))) ||
+        any(greaterThan(uv, vec2(1.0)))) {
+        return 1.0;
+    }
+
+    return textureLod(depth_map, vec3(uv, ndc.z), 0.0);
+}
+
 void main() {
     vec3 albedo =
         texture(albedo_texture, in_uv).rgb *
@@ -265,7 +293,10 @@ void main() {
             N, L, V, albedo, specular_color
         );
 
-    vec3 result = ambient + directional;
+    float sun_visibility = shadow_visibility(
+        shadow_map, scene_data.light_view_projection, in_world_position
+    );
+    vec3 result = ambient + sun_visibility * directional;
 
     for (uint i = 0u; i < scene_data.light_counts.x; ++i) {
         result += evaluate_point_light(
@@ -278,13 +309,23 @@ void main() {
     }
 
     for (uint i = 0u; i < scene_data.light_counts.y; ++i) {
-        result += evaluate_spot_light(
+        vec3 spot = evaluate_spot_light(
             spot_light_buffer.lights[i],
             N,
             V,
             albedo,
             specular_color
         );
+
+        if (i == 0u) {
+            spot *= shadow_visibility(
+                spot_shadow_map,
+                scene_data.spot_light_view_projection,
+                in_world_position
+            );
+        }
+
+        result += spot;
     }
 
     out_color = vec4(result + emissive, 1.0);

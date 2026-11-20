@@ -66,6 +66,12 @@ bool update(double time, GLFWwindow* window) {
 		aspect_ratio
 	);
 
+	uniforms.shadow = scene_state.directional_light.shadow;
+	uniforms.scene.light_view_projection = scene::compute_light_view_projection(
+		glm::vec3(uniforms.scene.directional_light_direction),
+		uniforms.shadow.orthographic_half_extent
+	);
+
 	for (std::size_t i = 0; i < scene_state.objects.size(); ++i) {
 		auto& object = scene_state.objects[i];
 
@@ -106,6 +112,13 @@ bool update(double time, GLFWwindow* window) {
 		uniforms.spot_lights[i] = scene::compute_spot_light_data(
 			scene_state.spot_lights[i]
 		);
+	}
+
+	if (!uniforms.spot_lights.empty()) {
+		uniforms.scene.spot_light_view_projection =
+			scene::compute_spot_light_view_projection(uniforms.spot_lights.front());
+	} else {
+		uniforms.scene.spot_light_view_projection = glm::mat4(1.0f);
 	}
 
 	auto& markers = uniforms.light_markers;
