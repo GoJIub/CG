@@ -55,6 +55,29 @@ void draw_lighting_controls(scene::SceneState& state) {
         ImGuiSliderFlags_AlwaysClamp
     );
 
+	auto& shadow = light.shadow;
+
+	ImGui::SliderFloat(
+		"Shadow half extent",
+		&shadow.orthographic_half_extent,
+		1.0f, 24.0f, "%.1f",
+		ImGuiSliderFlags_AlwaysClamp
+	);
+
+	ImGui::SliderFloat(
+		"Depth bias constant",
+		&shadow.depth_bias_constant,
+		0.0f, 8.0f, "%.2f",
+		ImGuiSliderFlags_AlwaysClamp
+	);
+
+	ImGui::SliderFloat(
+		"Depth bias slope",
+		&shadow.depth_bias_slope,
+		0.0f, 4.0f, "%.2f",
+		ImGuiSliderFlags_AlwaysClamp
+	);
+
     ImGui::ColorEdit3(
         "Ambient light",
         &state.ambient_light.x
