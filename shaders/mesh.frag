@@ -11,11 +11,10 @@ layout(std140, set = 0, binding = 0) uniform SceneUniformData {
     uvec4 light_counts;
 
     mat4 light_view_projection;
-    mat4 spot_light_view_projection;
 } scene_data;
 
 layout(set = 0, binding = 3) uniform sampler2DShadow shadow_map;
-layout(set = 0, binding = 4) uniform sampler2DShadow spot_shadow_map;
+layout(set = 0, binding = 4) uniform sampler2DArrayShadow spot_shadow_map;
 
 struct PointLightData {
     vec4 position;
@@ -31,6 +30,7 @@ struct SpotLightData {
     vec4 color;
     vec4 direction;
     vec4 cone_cosines;
+    mat4 light_view_projection;
 };
 
 layout(std430, set = 0, binding = 2) readonly buffer SpotLights {
@@ -188,26 +188,46 @@ vec3 evaluate_spot_light(
     );
 }
 
+bool project_shadow(mat4 view_projection, vec3 world_position, out vec3 uv_depth) {
+    vec4 clip = view_projection * vec4(world_position, 1.0);
+    if (clip.w <= 0.0) {
+        return false;
+    }
+
+    vec3 ndc = clip.xyz / clip.w;
+    uv_depth = vec3(ndc.xy * 0.5 + 0.5, ndc.z);
+
+    return ndc.z >= 0.0 && ndc.z < 1.0 &&
+           all(greaterThanEqual(uv_depth.xy, vec2(0.0))) &&
+           all(lessThanEqual(uv_depth.xy, vec2(1.0)));
+}
+
 float shadow_visibility(
     sampler2DShadow depth_map,
     mat4 light_view_projection,
     vec3 world_position
 ) {
-    vec4 clip = light_view_projection * vec4(world_position, 1.0);
-    if (clip.w <= 0.0) {
+    vec3 uv_depth;
+    if (!project_shadow(light_view_projection, world_position, uv_depth)) {
         return 1.0;
     }
 
-    vec3 ndc = clip.xyz / clip.w;
-    vec2 uv = ndc.xy * 0.5 + 0.5;
+    return textureLod(depth_map, uv_depth, 0.0);
+}
 
-    if (ndc.z < 0.0 || ndc.z >= 1.0 ||
-        any(lessThan(uv, vec2(0.0))) ||
-        any(greaterThan(uv, vec2(1.0)))) {
+float spot_shadow_visibility(mat4 view_projection, uint layer, vec3 world_position) {
+    vec3 uv_depth;
+    if (!project_shadow(view_projection, world_position, uv_depth)) {
         return 1.0;
     }
 
-    return textureLod(depth_map, vec3(uv, ndc.z), 0.0);
+    vec2 texel = 1.0 / vec2(textureSize(spot_shadow_map, 0).xy);
+    return textureGrad(
+        spot_shadow_map,
+        vec4(uv_depth.xy, float(layer), uv_depth.z),
+        vec2(texel.x, 0.0),
+        vec2(0.0, texel.y)
+    );
 }
 
 void main() {
@@ -309,23 +329,11 @@ void main() {
     }
 
     for (uint i = 0u; i < scene_data.light_counts.y; ++i) {
-        vec3 spot = evaluate_spot_light(
-            spot_light_buffer.lights[i],
-            N,
-            V,
-            albedo,
-            specular_color
+        SpotLightData light = spot_light_buffer.lights[i];
+        vec3 spot = evaluate_spot_light(light, N, L, albedo, specular_color);
+        result += spot * spot_shadow_visibility(
+            light.light_view_projection, i, in_world_position
         );
-
-        if (i == 0u) {
-            spot *= shadow_visibility(
-                spot_shadow_map,
-                scene_data.spot_light_view_projection,
-                in_world_position
-            );
-        }
-
-        result += spot;
     }
 
     out_color = vec4(result + emissive, 1.0);

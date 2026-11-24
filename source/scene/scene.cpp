@@ -352,6 +352,8 @@ SpotLightData compute_spot_light_data(
         0.0f
     );
 
+    data.light_view_projection = compute_spot_light_view_projection(data);
+
     return data;
 }
 

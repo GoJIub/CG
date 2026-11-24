@@ -109,17 +109,9 @@ bool update(double time, GLFWwindow* window) {
 
 	uniforms.spot_lights.resize(scene_state.spot_lights.size());
 
-	for (std::size_t i = 0; i < scene_state.spot_lights.size(); ++i) {
-		uniforms.spot_lights[i] = scene::compute_spot_light_data(
-			scene_state.spot_lights[i]
-		);
-	}
-
-	if (!uniforms.spot_lights.empty()) {
-		uniforms.scene.spot_light_view_projection =
-			scene::compute_spot_light_view_projection(uniforms.spot_lights.front());
-	} else {
-		uniforms.scene.spot_light_view_projection = glm::mat4(1.0f);
+	for (std::size_t i = 0; i < uniforms.spot_lights.size(); ++i) {
+		uniforms.spot_lights[i] =
+			scene::compute_spot_light_data(scene_state.spot_lights[i]);
 	}
 
 	auto& markers = uniforms.light_markers;

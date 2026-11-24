@@ -150,7 +150,6 @@ struct SceneUniformData {
     glm::uvec4 light_counts{0u};
 
     glm::mat4 light_view_projection{1.0f};
-    glm::mat4 spot_light_view_projection{1.0f};
 };
 
 struct ObjectUniformData {
@@ -171,6 +170,7 @@ struct SpotLightData {
     glm::vec4 color{0.0f};
     glm::vec4 direction{0.0f, -1.0f, 0.0f, 0.0f};
     glm::vec4 cone_cosines{0.0f};
+    glm::mat4 light_view_projection{1.0f};
 };
 
 struct LightMarkerData {
@@ -214,15 +214,16 @@ struct FrameUniformData {
 static_assert(
     sizeof(PointLightData) == sizeof(glm::vec4) * 2
 );
-
 static_assert(
     offsetof(PointLightData, color) == sizeof(glm::vec4)
 );
 
 static_assert(
-    sizeof(SpotLightData) == sizeof(glm::vec4) * 4
+    sizeof(SpotLightData) == sizeof(glm::vec4) * 4 + sizeof(glm::mat4)
 );
-
+static_assert(
+    offsetof(SpotLightData, light_view_projection) == sizeof(glm::vec4) * 4
+);
 static_assert(
     offsetof(SpotLightData, cone_cosines) ==
     sizeof(glm::vec4) * 3
@@ -230,7 +231,7 @@ static_assert(
 
 static_assert(
     sizeof(SceneUniformData) ==
-    sizeof(glm::mat4) * 3 +
+    sizeof(glm::mat4) * 2 +
     sizeof(glm::vec4) * 4 +
     sizeof(glm::uvec4)
 );
