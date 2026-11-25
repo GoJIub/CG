@@ -397,10 +397,13 @@ bool initialize(GLFWwindow* const window) {
 	VkPhysicalDeviceVulkan13Features features13{};
 	features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
 	features13.dynamicRendering = VK_TRUE;
+	VkPhysicalDeviceFeatures required_features{};
+	required_features.imageCubeArray = VK_TRUE;
 
 	vkb::PhysicalDeviceSelector pds(vkb_instance, vk_surface);
 	auto pds_result = pds
 		.set_minimum_version(1, 3)
+		.set_required_features(required_features)
 		.set_required_features_13(features13)
 		.prefer_gpu_device_type(vkb::PreferredDeviceType::discrete)
 		.require_present()

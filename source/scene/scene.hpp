@@ -205,7 +205,7 @@ struct FrameUniformData {
     SceneUniformData scene;
     std::array<ObjectUniformData, object_count> objects;
     std::vector<PointLightData> point_lights;
-    PointShadowMatrices point_light_view_projections{};
+    std::vector<PointShadowMatrices> point_light_view_projections;
     std::vector<SpotLightData> spot_lights;
     std::vector<LightMarkerData> light_markers;
     std::vector<glm::mat4> spot_light_cone_models;

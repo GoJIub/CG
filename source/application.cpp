@@ -100,18 +100,13 @@ bool update(double time, GLFWwindow* window) {
         scene_state.floor.material_id;
 
 	uniforms.point_lights.resize(scene_state.point_lights.size());
+	uniforms.point_light_view_projections.resize(uniforms.point_lights.size());
 
-	for (std::size_t i = 0; i < scene_state.point_lights.size(); ++i) {
-		uniforms.point_lights[i] = scene::compute_point_light_data(
-			scene_state.point_lights[i]
-		);
-	}
-
-	if (!uniforms.point_lights.empty()) {
-		uniforms.point_light_view_projections =
-			scene::compute_point_light_view_projections(uniforms.point_lights.front());
-	} else {
-		uniforms.point_light_view_projections.fill(glm::mat4(1.0f));
+	for (std::size_t i = 0; i < uniforms.point_lights.size(); ++i) {
+		auto& light = uniforms.point_lights[i];
+		light = scene::compute_point_light_data(scene_state.point_lights[i]);
+		uniforms.point_light_view_projections[i] =
+			scene::compute_point_light_view_projections(light);
 	}
 
 	uniforms.spot_lights.resize(scene_state.spot_lights.size());

@@ -29,12 +29,12 @@ constexpr uint32_t shadow_map_size = 4096;
 constexpr uint32_t spot_shadow_map_size = 1024;
 constexpr uint32_t point_shadow_map_size = 1024;
 constexpr VkFormat shadow_map_format = VK_FORMAT_D32_SFLOAT;
+constexpr VkImageUsageFlags shadow_image_usage =
+    VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+    VK_IMAGE_USAGE_SAMPLED_BIT;
 constexpr VkImageLayout shadow_map_read_layout =
     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
 constexpr std::size_t first_point_shadow_record = 1;
-constexpr std::size_t first_spot_shadow_record =
-    first_point_shadow_record + scene::point_shadow_face_count;
 
 struct ShadowImageResources {
     VkImage image = VK_NULL_HANDLE;
@@ -132,6 +132,23 @@ struct Resources {
 
 Resources resources;
 
+constexpr std::size_t point_shadow_layer(std::size_t light, std::size_t face) {
+    return light * scene::point_shadow_face_count + face;
+}
+
+std::size_t first_spot_shadow_record() {
+    return first_point_shadow_record + resources.point_shadow_map.layer_views.size();
+}
+
+VkImageCreateFlags shadow_image_flags(VkImageViewType sampling_view_type) {
+    const bool is_cube = sampling_view_type == VK_IMAGE_VIEW_TYPE_CUBE ||
+                         sampling_view_type == VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
+
+    return is_cube
+        ? VkImageCreateFlags{VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT}
+        : VkImageCreateFlags{0};
+}
+
 bool create_shadow_map(
     ShadowImageResources& shadow,
     uint32_t size,
@@ -157,9 +174,7 @@ bool create_shadow_map(
 
     const VkImageCreateInfo image_info{
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .flags = sampling_view_type == VK_IMAGE_VIEW_TYPE_CUBE
-            ? VkImageCreateFlags{VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT}
-            : VkImageCreateFlags{0},
+        .flags = shadow_image_flags(sampling_view_type),
         .imageType = VK_IMAGE_TYPE_2D,
         .format = shadow_map_format,
         .extent = {size, size, 1},
@@ -167,8 +182,7 @@ bool create_shadow_map(
         .arrayLayers = layer_count,
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
-                 VK_IMAGE_USAGE_SAMPLED_BIT,
+        .usage = shadow_image_usage,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
@@ -215,7 +229,10 @@ bool create_shadow_map(
     if (sampling_view_type != VK_IMAGE_VIEW_TYPE_2D) {
         view_info.viewType = sampling_view_type;
         view_info.subresourceRange.baseArrayLayer = 0;
-        view_info.subresourceRange.layerCount = layer_count;
+        view_info.subresourceRange.layerCount =
+            sampling_view_type == VK_IMAGE_VIEW_TYPE_CUBE
+                ? static_cast<uint32_t>(scene::point_shadow_face_count)
+                : layer_count;
 
         if (vkCreateImageView(
                 context.device, &view_info, nullptr, &shadow.sampling_view
@@ -518,11 +535,15 @@ void update_shadow_image_descriptor(
     );
 }
 
-bool ensure_spot_shadow_capacity(std::size_t required) {
-    auto& depth = resources.spot_shadow_map;
-    const std::size_t capacity = depth.layer_views.size();
-
-    if (required <= capacity) {
+bool ensure_shadow_capacity(
+    ShadowImageResources& depth,
+    std::size_t required_maps,
+    uint32_t layers_per_map,
+    VkImageViewType sampling_view_type,
+    uint32_t binding
+) {
+    const std::size_t capacity = depth.layer_views.size() / layers_per_map;
+    if (required_maps <= capacity) {
         return true;
     }
 
@@ -533,34 +554,36 @@ bool ensure_spot_shadow_capacity(std::size_t required) {
             shadow_map_format,
             VK_IMAGE_TYPE_2D,
             VK_IMAGE_TILING_OPTIMAL,
-            VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
-                VK_IMAGE_USAGE_SAMPLED_BIT,
-            0,
+            shadow_image_usage,
+            shadow_image_flags(sampling_view_type),
             &properties
-        ) != VK_SUCCESS || required > properties.maxArrayLayers) {
-        std::cerr << "Spot shadow layer count exceeds image format limits\n";
+        ) != VK_SUCCESS) {
+        std::cerr << "Failed to query shadow image format limits\n";
         return false;
     }
 
-    const std::size_t limit = properties.maxArrayLayers;
+    const std::size_t limit = properties.maxArrayLayers / layers_per_map;
+    if (required_maps > limit) {
+        std::cerr << "Requested shadow map count exceeds image format limits\n";
+        return false;
+    }
+
     const std::size_t grown_capacity = std::max(
-        required,
+        required_maps,
         capacity > limit / 2 ? limit : capacity * 2
     );
+    const auto layer_count = static_cast<uint32_t>(grown_capacity * layers_per_map);
 
     ShadowImageResources replacement;
     if (!create_shadow_map(
-            replacement,
-            spot_shadow_map_size,
-            static_cast<uint32_t>(grown_capacity),
-            VK_IMAGE_VIEW_TYPE_2D_ARRAY
+            replacement, depth.extent.width, layer_count, sampling_view_type
         )) {
         destroy_shadow_image(replacement);
         return false;
     }
 
     std::swap(depth, replacement);
-    update_shadow_image_descriptor(depth, depth.sampling_view, 4);
+    update_shadow_image_descriptor(depth, depth.sampling_view, binding);
     destroy_shadow_image(replacement);
     return true;
 }
@@ -1715,7 +1738,7 @@ bool initialize() {
             resources.point_shadow_map,
             point_shadow_map_size,
             static_cast<uint32_t>(scene::point_shadow_face_count),
-            VK_IMAGE_VIEW_TYPE_CUBE
+            VK_IMAGE_VIEW_TYPE_CUBE_ARRAY
         )) {
         destroy_resources();
         return false;
@@ -1743,11 +1766,27 @@ void shutdown() {
 }
 
 bool update_uniform_buffers(const scene::FrameUniformData& uniforms) {
-    if (!ensure_spot_shadow_capacity(uniforms.spot_lights.size())) {
+    if (!ensure_shadow_capacity(
+            resources.spot_shadow_map,
+            uniforms.spot_lights.size(),
+            1,
+            VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+            4
+        ) ||
+        !ensure_shadow_capacity(
+            resources.point_shadow_map,
+            uniforms.point_lights.size(),
+            static_cast<uint32_t>(scene::point_shadow_face_count),
+            VK_IMAGE_VIEW_TYPE_CUBE_ARRAY,
+            5
+        )) {
         return false;
     }
+
+    const std::size_t spot_record_begin = first_spot_shadow_record();
+
     if (!ensure_shadow_uniform_capacity(
-            first_spot_shadow_record + resources.spot_shadow_map.layer_views.size()
+            spot_record_begin + resources.spot_shadow_map.layer_views.size()
         )) {
         return false;
     }
@@ -1823,18 +1862,23 @@ bool update_uniform_buffers(const scene::FrameUniformData& uniforms) {
     );
 
     const auto& point_matrices = uniforms.point_light_view_projections;
-    for (std::size_t face = 0; face < point_matrices.size(); ++face) {
-        std::memcpy(
-            shadow_uniforms.upload_data.data() +
-                stride * (first_point_shadow_record + face),
-            &point_matrices[face],
-            sizeof(glm::mat4)
-        );
+
+    for (std::size_t light = 0; light < point_matrices.size(); ++light) {
+        for (std::size_t face = 0; face < point_matrices[light].size(); ++face) {
+            const std::size_t record =
+                first_point_shadow_record + point_shadow_layer(light, face);
+
+            std::memcpy(
+                shadow_uniforms.upload_data.data() + stride * record,
+                &point_matrices[light][face],
+                sizeof(glm::mat4)
+            );
+        }
     }
 
     for (std::size_t i = 0; i < spot_lights.size(); ++i) {
         std::memcpy(
-            shadow_uniforms.upload_data.data() + stride * (first_spot_shadow_record + i),
+            shadow_uniforms.upload_data.data() + stride * (spot_record_begin + i),
             &spot_lights[i].light_view_projection,
             sizeof(glm::mat4)
         );
@@ -1844,7 +1888,7 @@ bool update_uniform_buffers(const scene::FrameUniformData& uniforms) {
             graphics::internal::context.allocator,
             shadow_uniforms.allocation,
             shadow_uniforms.upload_data.data(),
-            stride * (first_spot_shadow_record + spot_lights.size())
+            stride * (spot_record_begin + spot_lights.size())
         )) {
         return false;
     }
@@ -1934,10 +1978,11 @@ void render(
     auto& spot_shadow = resources.spot_shadow_map;
     const auto spot_count = static_cast<uint32_t>(uniforms.spot_lights.size());
     const auto layer_count = static_cast<uint32_t>(spot_shadow.layer_views.size());
+    const std::size_t spot_record_begin = first_spot_shadow_record();
 
     for (uint32_t i = 0; i < spot_count; ++i) {
         record_shadow_pass(
-            command_buffer, spot_shadow, i, first_spot_shadow_record + i,
+            command_buffer, spot_shadow, i, spot_record_begin + i,
             uniforms, record_layout
         );
     }
@@ -1967,17 +2012,20 @@ void render(
     spot_shadow.read_layout_ready = true;
 
     auto& point_shadow = resources.point_shadow_map;
+    const auto used_layers = static_cast<uint32_t>(
+        uniforms.point_lights.size() * scene::point_shadow_face_count
+    );
 
-    if (!uniforms.point_lights.empty()) {
-        for (uint32_t face = 0; face < scene::point_shadow_face_count; ++face) {
-            record_shadow_pass(
-                command_buffer, point_shadow, face,
-                first_point_shadow_record + face,
-                uniforms, record_layout, VK_FRONT_FACE_CLOCKWISE
-            );
-        }
-    } else if (!point_shadow.read_layout_ready) {
-        const VkImageMemoryBarrier to_shader_read{
+    for (uint32_t layer = 0; layer < used_layers; ++layer) {
+        record_shadow_pass(
+            command_buffer, point_shadow, layer,
+            first_point_shadow_record + layer,
+            uniforms, record_layout, VK_FRONT_FACE_CLOCKWISE
+        );
+    }
+
+    if (!point_shadow.read_layout_ready && used_layers < layer_count) {
+        const VkImageMemoryBarrier unused_layers_to_read{
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
             .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
@@ -1986,8 +2034,7 @@ void render(
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image = point_shadow.image,
             .subresourceRange = {
-                VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0,
-                static_cast<uint32_t>(scene::point_shadow_face_count)
+                VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, used_layers, layer_count - used_layers
             },
         };
 
@@ -1995,7 +2042,7 @@ void render(
             command_buffer,
             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            0, 0, nullptr, 0, nullptr, 1, &to_shader_read
+            0, 0, nullptr, 0, nullptr, 1, &unused_layers_to_read
         );
     }
 
