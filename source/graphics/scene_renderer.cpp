@@ -27,16 +27,21 @@ namespace {
 
 constexpr uint32_t shadow_map_size = 4096;
 constexpr uint32_t spot_shadow_map_size = 1024;
+constexpr uint32_t point_shadow_map_size = 1024;
 constexpr VkFormat shadow_map_format = VK_FORMAT_D32_SFLOAT;
 constexpr VkImageLayout shadow_map_read_layout =
     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+constexpr std::size_t first_point_shadow_record = 1;
+constexpr std::size_t first_spot_shadow_record =
+    first_point_shadow_record + scene::point_shadow_face_count;
 
 struct ShadowImageResources {
     VkImage image = VK_NULL_HANDLE;
     VmaAllocation allocation = nullptr;
     VkExtent2D extent{};
     std::vector<VkImageView> layer_views;
-    VkImageView array_view = VK_NULL_HANDLE;
+    VkImageView sampling_view = VK_NULL_HANDLE;
     VkSampler sampler = VK_NULL_HANDLE;
     bool read_layout_ready = false;
 };
@@ -122,6 +127,7 @@ struct Resources {
     ShadowUniformResources shadow_uniforms;
     ShadowImageResources shadow_map;
     ShadowImageResources spot_shadow_map;
+    ShadowImageResources point_shadow_map;
 };
 
 Resources resources;
@@ -130,7 +136,7 @@ bool create_shadow_map(
     ShadowImageResources& shadow,
     uint32_t size,
     uint32_t layer_count,
-    bool create_array_view
+    VkImageViewType sampling_view_type
 ) {
     auto& context = graphics::internal::context;
     shadow.extent = {size, size};
@@ -151,6 +157,9 @@ bool create_shadow_map(
 
     const VkImageCreateInfo image_info{
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .flags = sampling_view_type == VK_IMAGE_VIEW_TYPE_CUBE
+            ? VkImageCreateFlags{VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT}
+            : VkImageCreateFlags{0},
         .imageType = VK_IMAGE_TYPE_2D,
         .format = shadow_map_format,
         .extent = {size, size, 1},
@@ -203,15 +212,15 @@ bool create_shadow_map(
         }
     }
 
-    if (create_array_view) {
-        view_info.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+    if (sampling_view_type != VK_IMAGE_VIEW_TYPE_2D) {
+        view_info.viewType = sampling_view_type;
         view_info.subresourceRange.baseArrayLayer = 0;
         view_info.subresourceRange.layerCount = layer_count;
 
         if (vkCreateImageView(
-                context.device, &view_info, nullptr, &shadow.array_view
+                context.device, &view_info, nullptr, &shadow.sampling_view
             ) != VK_SUCCESS) {
-            std::cerr << "Failed to create shadow array view\n";
+            std::cerr << "Failed to create shadow sampling view\n";
             return false;
         }
     }
@@ -340,6 +349,7 @@ bool create_shadow_pipeline(
 		VK_DYNAMIC_STATE_VIEWPORT,
 		VK_DYNAMIC_STATE_SCISSOR,
         VK_DYNAMIC_STATE_DEPTH_BIAS,
+        VK_DYNAMIC_STATE_FRONT_FACE,
 	};
 
 	VkPipelineViewportStateCreateInfo viewport_state_info{
@@ -468,8 +478,8 @@ void destroy_shadow_image(ShadowImageResources& depth) {
     if (depth.sampler != VK_NULL_HANDLE) {
         vkDestroySampler(context.device, depth.sampler, nullptr);
     }
-    if (depth.array_view != VK_NULL_HANDLE) {
-        vkDestroyImageView(context.device, depth.array_view, nullptr);
+    if (depth.sampling_view != VK_NULL_HANDLE) {
+        vkDestroyImageView(context.device, depth.sampling_view, nullptr);
     }
     for (VkImageView view : depth.layer_views) {
         if (view != VK_NULL_HANDLE) {
@@ -543,14 +553,14 @@ bool ensure_spot_shadow_capacity(std::size_t required) {
             replacement,
             spot_shadow_map_size,
             static_cast<uint32_t>(grown_capacity),
-            true
+            VK_IMAGE_VIEW_TYPE_2D_ARRAY
         )) {
         destroy_shadow_image(replacement);
         return false;
     }
 
     std::swap(depth, replacement);
-    update_shadow_image_descriptor(depth, depth.array_view, 4);
+    update_shadow_image_descriptor(depth, depth.sampling_view, 4);
     destroy_shadow_image(replacement);
     return true;
 }
@@ -605,6 +615,7 @@ void destroy_resources() {
 		resources.marker_descriptor_set = VK_NULL_HANDLE;
 	}
 
+    destroy_shadow_image(resources.point_shadow_map);
     destroy_shadow_image(resources.spot_shadow_map);
     destroy_shadow_image(resources.shadow_map);
 
@@ -946,7 +957,8 @@ void record_shadow_pass(
     uint32_t layer,
     std::size_t light_record,
     const scene::FrameUniformData& uniforms,
-    const UniformRecordLayout& record_layout
+    const UniformRecordLayout& record_layout,
+    VkFrontFace front_face = VK_FRONT_FACE_COUNTER_CLOCKWISE
 ) {
     const VkExtent2D extent = depth.extent;
     constexpr VkImageLayout attachment_layout =
@@ -1007,6 +1019,7 @@ void record_shadow_pass(
 
     vkCmdSetViewport(command_buffer, 0, 1, &viewport);
     vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+    vkCmdSetFrontFace(command_buffer, front_face);
     vkCmdSetDepthBias(
         command_buffer,
         uniforms.shadow.depth_bias_constant,
@@ -1407,6 +1420,13 @@ bool initialize() {
             .descriptorCount = 1,
             .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
+
+        VkDescriptorSetLayoutBinding{
+            .binding = 5,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        },
 	};
 
 	const VkDescriptorSetLayoutCreateInfo scene_layout_info{
@@ -1468,7 +1488,7 @@ bool initialize() {
         },
         {
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            static_cast<uint32_t>(scene::material_count * 3 + 2)
+            static_cast<uint32_t>(scene::material_count * 3 + 3)
         }
     };
 
@@ -1687,14 +1707,25 @@ bool initialize() {
 		return false;
 	}
 
-    if (!create_shadow_map(shadow, shadow_map_size, 1, false) ||
-        !create_shadow_map(spot_shadow, spot_shadow_map_size, 1, true)) {
+    if (!create_shadow_map(shadow, shadow_map_size, 1, VK_IMAGE_VIEW_TYPE_2D) ||
+        !create_shadow_map(
+            spot_shadow, spot_shadow_map_size, 1, VK_IMAGE_VIEW_TYPE_2D_ARRAY
+        ) ||
+        !create_shadow_map(
+            resources.point_shadow_map,
+            point_shadow_map_size,
+            static_cast<uint32_t>(scene::point_shadow_face_count),
+            VK_IMAGE_VIEW_TYPE_CUBE
+        )) {
         destroy_resources();
         return false;
     }
 
     update_shadow_image_descriptor(shadow, shadow.layer_views.front(), 3);
-    update_shadow_image_descriptor(spot_shadow, spot_shadow.array_view, 4);
+    update_shadow_image_descriptor(spot_shadow, spot_shadow.sampling_view, 4);
+    update_shadow_image_descriptor(
+        resources.point_shadow_map, resources.point_shadow_map.sampling_view, 5
+    );
 
     if (!create_shadow_pipeline(context.device)) {
         destroy_resources();
@@ -1716,7 +1747,7 @@ bool update_uniform_buffers(const scene::FrameUniformData& uniforms) {
         return false;
     }
     if (!ensure_shadow_uniform_capacity(
-            1 + resources.spot_shadow_map.layer_views.size()
+            first_spot_shadow_record + resources.spot_shadow_map.layer_views.size()
         )) {
         return false;
     }
@@ -1791,9 +1822,19 @@ bool update_uniform_buffers(const scene::FrameUniformData& uniforms) {
         sizeof(glm::mat4)
     );
 
+    const auto& point_matrices = uniforms.point_light_view_projections;
+    for (std::size_t face = 0; face < point_matrices.size(); ++face) {
+        std::memcpy(
+            shadow_uniforms.upload_data.data() +
+                stride * (first_point_shadow_record + face),
+            &point_matrices[face],
+            sizeof(glm::mat4)
+        );
+    }
+
     for (std::size_t i = 0; i < spot_lights.size(); ++i) {
         std::memcpy(
-            shadow_uniforms.upload_data.data() + stride * (i + 1),
+            shadow_uniforms.upload_data.data() + stride * (first_spot_shadow_record + i),
             &spot_lights[i].light_view_projection,
             sizeof(glm::mat4)
         );
@@ -1803,7 +1844,7 @@ bool update_uniform_buffers(const scene::FrameUniformData& uniforms) {
             graphics::internal::context.allocator,
             shadow_uniforms.allocation,
             shadow_uniforms.upload_data.data(),
-            stride * (1 + spot_lights.size())
+            stride * (first_spot_shadow_record + spot_lights.size())
         )) {
         return false;
     }
@@ -1895,7 +1936,10 @@ void render(
     const auto layer_count = static_cast<uint32_t>(spot_shadow.layer_views.size());
 
     for (uint32_t i = 0; i < spot_count; ++i) {
-        record_shadow_pass(command_buffer, spot_shadow, i, i + 1, uniforms, record_layout);
+        record_shadow_pass(
+            command_buffer, spot_shadow, i, first_spot_shadow_record + i,
+            uniforms, record_layout
+        );
     }
 
     if (!spot_shadow.read_layout_ready && spot_count < layer_count) {
@@ -1921,6 +1965,41 @@ void render(
     }
 
     spot_shadow.read_layout_ready = true;
+
+    auto& point_shadow = resources.point_shadow_map;
+
+    if (!uniforms.point_lights.empty()) {
+        for (uint32_t face = 0; face < scene::point_shadow_face_count; ++face) {
+            record_shadow_pass(
+                command_buffer, point_shadow, face,
+                first_point_shadow_record + face,
+                uniforms, record_layout, VK_FRONT_FACE_CLOCKWISE
+            );
+        }
+    } else if (!point_shadow.read_layout_ready) {
+        const VkImageMemoryBarrier to_shader_read{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = shadow_map_read_layout,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = point_shadow.image,
+            .subresourceRange = {
+                VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0,
+                static_cast<uint32_t>(scene::point_shadow_face_count)
+            },
+        };
+
+        vkCmdPipelineBarrier(
+            command_buffer,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &to_shader_read
+        );
+    }
+
+    point_shadow.read_layout_ready = true;
 
 	VkClearValue clear_values[] = {
 		{.color = {{0.05f, 0.08f, 0.12f, 1.0f}}},

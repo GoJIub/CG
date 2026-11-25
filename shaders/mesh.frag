@@ -11,10 +11,12 @@ layout(std140, set = 0, binding = 0) uniform SceneUniformData {
     uvec4 light_counts;
 
     mat4 light_view_projection;
+    vec4 point_shadow_depth_range;
 } scene_data;
 
 layout(set = 0, binding = 3) uniform sampler2DShadow shadow_map;
 layout(set = 0, binding = 4) uniform sampler2DArrayShadow spot_shadow_map;
+layout(set = 0, binding = 5) uniform samplerCubeShadow point_shadow_map;
 
 struct PointLightData {
     vec4 position;
@@ -230,6 +232,31 @@ float spot_shadow_visibility(mat4 view_projection, uint layer, vec3 world_positi
     );
 }
 
+float point_shadow_visibility(vec3 light_to_fragment) {
+    vec3 direction_dx = dFdx(light_to_fragment);
+    vec3 direction_dy = dFdy(light_to_fragment);
+
+    vec3 axis_distances = abs(light_to_fragment);
+    float face_distance = max(axis_distances.x, max(axis_distances.y, axis_distances.z));
+    float near_plane = scene_data.point_shadow_depth_range.x;
+    float far_plane = scene_data.point_shadow_depth_range.y;
+
+    if (face_distance <= near_plane || face_distance >= far_plane) {
+        return 1.0;
+    }
+
+    float reference_depth =
+        (far_plane / (far_plane - near_plane)) *
+        (1.0 - near_plane / face_distance);
+
+    return textureGrad(
+        point_shadow_map,
+        vec4(light_to_fragment, reference_depth),
+        direction_dx,
+        direction_dy
+    );
+}
+
 void main() {
     vec3 albedo =
         texture(albedo_texture, in_uv).rgb *
@@ -319,18 +346,19 @@ void main() {
     vec3 result = ambient + sun_visibility * directional;
 
     for (uint i = 0u; i < scene_data.light_counts.x; ++i) {
-        result += evaluate_point_light(
-            point_light_buffer.lights[i],
-            N,
-            V,
-            albedo,
-            specular_color
-        );
+        PointLightData light = point_light_buffer.lights[i];
+        vec3 point = evaluate_point_light(light, N, V, albedo, specular_color);
+
+        if (i == 0u) {
+            point *= point_shadow_visibility(in_world_position - light.position.xyz);
+        }
+
+        result += point;
     }
 
     for (uint i = 0u; i < scene_data.light_counts.y; ++i) {
         SpotLightData light = spot_light_buffer.lights[i];
-        vec3 spot = evaluate_spot_light(light, N, L, albedo, specular_color);
+        vec3 spot = evaluate_spot_light(light, N, V, albedo, specular_color);
         result += spot * spot_shadow_visibility(
             light.light_view_projection, i, in_world_position
         );

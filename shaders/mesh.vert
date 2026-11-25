@@ -15,6 +15,7 @@ layout(std140, set = 0, binding = 0) uniform SceneUniformData {
     uvec4 light_counts;
 
     mat4 light_view_projection;
+    vec4 point_shadow_depth_range;
 } scene_data;
 
 layout(std140, set = 1, binding = 0) uniform ObjectUniformData {

@@ -107,6 +107,13 @@ bool update(double time, GLFWwindow* window) {
 		);
 	}
 
+	if (!uniforms.point_lights.empty()) {
+		uniforms.point_light_view_projections =
+			scene::compute_point_light_view_projections(uniforms.point_lights.front());
+	} else {
+		uniforms.point_light_view_projections.fill(glm::mat4(1.0f));
+	}
+
 	uniforms.spot_lights.resize(scene_state.spot_lights.size());
 
 	for (std::size_t i = 0; i < uniforms.spot_lights.size(); ++i) {

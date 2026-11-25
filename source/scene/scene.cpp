@@ -316,6 +316,44 @@ PointLightData compute_point_light_data(
     return data;
 }
 
+PointShadowMatrices compute_point_light_view_projections(
+    const PointLightData& light
+) {
+    const std::array<glm::vec3, point_shadow_face_count> directions{{
+        { 1.0f,  0.0f,  0.0f},  // +X
+        {-1.0f,  0.0f,  0.0f},  // -X
+        { 0.0f,  1.0f,  0.0f},  // +Y
+        { 0.0f, -1.0f,  0.0f},  // -Y
+        { 0.0f,  0.0f,  1.0f},  // +Z
+        { 0.0f,  0.0f, -1.0f},  // -Z
+    }};
+
+    const std::array<glm::vec3, point_shadow_face_count> up_vectors{{
+        {0.0f, -1.0f,  0.0f},
+        {0.0f, -1.0f,  0.0f},
+        {0.0f,  0.0f,  1.0f},
+        {0.0f,  0.0f, -1.0f},
+        {0.0f, -1.0f,  0.0f},
+        {0.0f, -1.0f,  0.0f},
+    }};
+
+    const glm::vec3 eye(light.position);
+    const glm::mat4 projection = glm::perspective(
+        glm::half_pi<float>(), 1.0f,
+        point_shadow_near_plane, point_shadow_far_plane
+    );
+
+    PointShadowMatrices matrices{};
+    for (std::size_t face = 0; face < matrices.size(); ++face) {
+        const glm::mat4 view = glm::lookAt(
+            eye, eye + directions[face], up_vectors[face]
+        );
+        matrices[face] = projection * view;
+    }
+
+    return matrices;
+}
+
 SpotLightData compute_spot_light_data(
     const SpotLightSettings& light
 ) {

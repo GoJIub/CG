@@ -139,6 +139,9 @@ void update_animation_state(
     double time
 );
 
+inline constexpr float point_shadow_near_plane = 0.1f;
+inline constexpr float point_shadow_far_plane = 30.0f;
+
 struct SceneUniformData {
     glm::mat4 view_projection{1.0f};
     glm::vec4 camera_position{0.0f, 0.0f, 0.0f, 1.0f};
@@ -150,6 +153,9 @@ struct SceneUniformData {
     glm::uvec4 light_counts{0u};
 
     glm::mat4 light_view_projection{1.0f};
+    glm::vec4 point_shadow_depth_range{
+        point_shadow_near_plane, point_shadow_far_plane, 0.0f, 0.0f
+    };
 };
 
 struct ObjectUniformData {
@@ -164,6 +170,9 @@ struct PointLightData {
     glm::vec4 position{0.0f, 0.0f, 0.0f, 1.0f};
     glm::vec4 color{0.0f};
 };
+
+constexpr std::size_t point_shadow_face_count = 6;
+using PointShadowMatrices = std::array<glm::mat4, point_shadow_face_count>;
 
 struct SpotLightData {
     glm::vec4 position{0.0f, 0.0f, 0.0f, 1.0f};
@@ -196,6 +205,7 @@ struct FrameUniformData {
     SceneUniformData scene;
     std::array<ObjectUniformData, object_count> objects;
     std::vector<PointLightData> point_lights;
+    PointShadowMatrices point_light_view_projections{};
     std::vector<SpotLightData> spot_lights;
     std::vector<LightMarkerData> light_markers;
     std::vector<glm::mat4> spot_light_cone_models;
@@ -232,7 +242,7 @@ static_assert(
 static_assert(
     sizeof(SceneUniformData) ==
     sizeof(glm::mat4) * 2 +
-    sizeof(glm::vec4) * 4 +
+    sizeof(glm::vec4) * 5 +
     sizeof(glm::uvec4)
 );
 
@@ -264,6 +274,10 @@ ObjectUniformData compute_floor_uniforms(
 
 PointLightData compute_point_light_data(
     const PointLightSettings& light
+);
+
+PointShadowMatrices compute_point_light_view_projections(
+    const PointLightData& light
 );
 
 SpotLightData compute_spot_light_data(
